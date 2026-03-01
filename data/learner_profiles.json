@@ -1,1 +1,30 @@
-Not found
+{
+  "Meera": {
+    "name": "Meera",
+    "topics": {
+      "Math": {
+        "scores": [
+          100,
+          0,
+          100
+        ],
+        "mastery": "Moderate",
+        "attempts": 3
+      },
+      "Coding": {
+        "scores": [
+          60
+        ],
+        "mastery": "Moderate",
+        "attempts": 1
+      },
+      "Aptitude": {
+        "scores": [
+          80
+        ],
+        "mastery": "Strong",
+        "attempts": 1
+      }
+    }
+  }
+}
