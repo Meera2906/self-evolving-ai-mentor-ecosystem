@@ -1,0 +1,41 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model Student {
+  id       String         @id @default(uuid())
+  name     String         @unique
+  attempts Attempt[]
+  progress TopicProgress[]
+}
+
+model Attempt {
+  id        String   @id @default(uuid())
+  studentId String
+  topic     String
+  score     Int
+  createdAt DateTime @default(now())
+
+  student Student @relation(fields: [studentId], references: [id])
+
+  @@index([studentId, topic])
+}
+
+model TopicProgress {
+  id        String   @id @default(uuid())
+  studentId String
+  topic     String
+  mastery   String
+  attempts  Int
+  avgScore  Float
+  updatedAt DateTime @updatedAt
+
+  student Student @relation(fields: [studentId], references: [id])
+
+  @@unique([studentId, topic])
+}
