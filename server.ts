@@ -1,7 +1,14 @@
 import { config } from 'dotenv';
-config();
+config({ path: ".env" });
+config({ path: ".env.local", override: true });
+
+console.log("OPENROUTER_API_KEY loaded?", Boolean(process.env.OPENROUTER_API_KEY));
+console.log("OPENROUTER_API_KEY prefix:", process.env.OPENROUTER_API_KEY?.slice(0, 10));
+
 import express from "express";
 import { createServer as createViteServer } from "vite";
+import OpenAI from "openai";
+
 import { LearnerAgent } from "./src/agents/learnerAgent";
 import { StrategyAgent } from "./src/agents/strategyAgent";
 import { AssessmentAgent } from "./src/agents/assessmentAgent";
@@ -12,7 +19,17 @@ async function startServer() {
   const PORT = 3000;
 
   app.use(express.json());
+  const openrouter = new OpenAI({
+    apiKey: process.env.OPENROUTER_API_KEY || "",
+    baseURL: "https://openrouter.ai/api/v1",
+  });
 
+  function extractJson(s: string) {
+    const a = s.indexOf("{");
+    const b = s.lastIndexOf("}");
+    return a !== -1 && b !== -1 ? s.slice(a, b + 1) : '{"questions":[]}';
+  }
+  
   // Initialize Agents
   const learnerAgent = new LearnerAgent();
   const strategyAgent = new StrategyAgent();
@@ -42,24 +59,18 @@ async function startServer() {
     }
   });
 
-  app.post("/api/quiz/generate", async (req, res) => {
+  app.post("/api/quiz/prepare", async (req, res) => {
     try {
-      const { name, topic } = req.body;
-      const profile = learnerAgent.getProfile(name);
-      const topicData = profile.topics[topic] || { mastery: 'Weak' };
-      
-      const quiz = await assessmentAgent.generateQuiz(topic, topicData.mastery);
-      const recommendation = strategyAgent.recommend(topic, topicData.mastery);
+      const { name, topic, mastery } = req.body;
+      const recommendation = strategyAgent.recommend(topic, mastery);
       
       res.json({ 
-        quiz, 
         recommendation, 
-        logs: [...assessmentAgent.getLogs(), ...strategyAgent.getLogs()] 
+        logs: [...strategyAgent.getLogs()] 
       });
-      assessmentAgent.clearLogs();
       strategyAgent.clearLogs();
     } catch (error) {
-      console.error("Error generating quiz:", error);
+      console.error("Error preparing quiz:", error);
       res.status(500).json({ error: "Internal Server Error" });
     }
   });
@@ -94,6 +105,40 @@ async function startServer() {
     } catch (error) {
       console.error("Error submitting quiz:", error);
       res.status(500).json({ error: "Internal Server Error" });
+    }
+  });
+
+  app.post("/api/quiz/generate", async (req, res) => {
+    try {
+      const { topic, mastery } = req.body;
+
+      const difficultyMap = { Weak: "Easy", Moderate: "Medium", Strong: "Hard" };
+      const difficulty = difficultyMap[mastery] || "Easy";
+
+      const prompt = `Generate a 5-question multiple choice quiz about ${topic} at ${difficulty} difficulty.
+  Return ONLY valid JSON:
+  {"questions":[{"question":"...","options":["A","B","C","D"],"correctIndex":0}]}`;
+
+      const resp = await openrouter.chat.completions.create(
+        {
+          model: "google/gemini-2.0-flash-001",
+          messages: [{ role: "user", content: prompt }],
+        },
+        {
+          headers: {
+            "HTTP-Referer": "http://localhost:3000",
+            "X-Title": "Self-Evolving AI Mentor Ecosystem",
+          },
+        }
+      );
+
+      const text = resp.choices?.[0]?.message?.content ?? '{"questions":[]}';
+      const quiz = JSON.parse(extractJson(text));
+
+      res.json(quiz);
+    } catch (error: any) {
+      console.error("OpenRouter error:", error);
+      res.status(500).json({ error: error?.message || "Failed to generate quiz" });
     }
   });
 

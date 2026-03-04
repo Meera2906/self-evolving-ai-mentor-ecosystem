@@ -31,6 +31,7 @@ import {
 import { motion, AnimatePresence } from 'motion/react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
+import { generateQuizWithAI } from './services/geminiService';
 import { StudentProfile, AnalyticsData, Quiz, Recommendation, MasteryLevel } from './types';
 
 function cn(...inputs: ClassValue[]) {
@@ -95,27 +96,40 @@ export default function App() {
     setLoading(true);
     try {
       setCurrentTopic(topic);
-      const res = await fetch('/api/quiz/generate', {
+      
+      // 1. Generate quiz on frontend using Gemini
+      const mastery = profile?.topics[topic]?.mastery || 'Weak';
+      const quiz = await generateQuizWithAI(topic, mastery);
+      
+      // 2. Get recommendation and logs from backend
+      const res = await fetch('/api/quiz/prepare', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: selectedStudent, topic })
+        body: JSON.stringify({ name: selectedStudent, topic, mastery })
       });
       
       if (!res.ok) {
         const errorData = await res.json();
-        throw new Error(errorData.error || 'Failed to generate quiz');
+        throw new Error(errorData.error || 'Failed to prepare quiz');
       }
       
       const data = await res.json();
       
-      setCurrentQuiz(data.quiz);
+      setCurrentQuiz(quiz);
       setCurrentRecommendation(data.recommendation);
-      setAnswers(new Array(data.quiz.questions.length).fill(-1));
-      if (data.logs) addLog(data.logs);
+      setAnswers(new Array(quiz.questions.length).fill(-1));
+      
+      const aiLogs = [
+        `[Assessment Agent] Generating adaptive quiz using Gemini AI`,
+        `[Assessment Agent] Topic: ${topic}, Mastery: ${mastery}`,
+        `[Assessment Agent] Quiz generated successfully with 5 questions`
+      ];
+      addLog([...aiLogs, ...data.logs]);
+      
       setStep('quiz');
-    } catch (error) {
+    } catch (error: any) {
       console.error('Failed to generate quiz:', error);
-      alert('Failed to generate quiz. Please check your connection.');
+      alert(error.message || 'Failed to generate quiz. Please check your connection.');
     } finally {
       setLoading(false);
     }

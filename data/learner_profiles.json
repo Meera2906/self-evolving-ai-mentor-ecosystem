@@ -6,10 +6,15 @@
         "scores": [
           100,
           0,
-          100
+          100,
+          100,
+          60,
+          80,
+          40,
+          80
         ],
         "mastery": "Moderate",
-        "attempts": 3
+        "attempts": 8
       },
       "Coding": {
         "scores": [
