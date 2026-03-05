@@ -8,6 +8,8 @@ import {
   ChevronRight, 
   CheckCircle2, 
   AlertCircle,
+  Sparkles,
+  ArrowRightCircle,
   Loader2,
   PlusCircle,
   History,
@@ -33,7 +35,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { generateQuizWithAI } from './services/geminiService';
-import { StudentProfile, AnalyticsData, Quiz, Recommendation, MasteryLevel } from './types';
+import { StudentProfile, AnalyticsData, Quiz, Recommendation, MasteryLevel, MentorFeedback } from './types';
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -55,7 +57,7 @@ export default function App() {
   const [currentQuiz, setCurrentQuiz] = useState<Quiz | null>(null);
   const [currentRecommendation, setCurrentRecommendation] = useState<Recommendation | null>(null);
   const [answers, setAnswers] = useState<number[]>([]);
-  const [quizResult, setQuizResult] = useState<{ score: number; updatedTopic: any } | null>(null);
+  const [quizResult, setQuizResult] = useState<{ score: number; updatedTopic: any; mentorFeedback?: MentorFeedback } | null>(null);
   const [darkMode, setDarkMode] = useState(false);
   const [showReview, setShowReview] = useState(false);
   const [showProfileSummary, setShowProfileSummary] = useState(false);
@@ -87,7 +89,7 @@ export default function App() {
   const handleSelectStudent = async (name: string) => {
     setLoading(true);
     setSelectedStudent(name);
-
+    
     // Reset filters when selecting a new student
     setFilterTopic('Overall');
     setSelectedMixedTopics(TOPICS);
@@ -205,9 +207,12 @@ export default function App() {
       }
 
       const data = await res.json();
-      setQuizResult({ score: data.score, updatedTopic: data.updatedTopic });
+      setQuizResult({ 
+        score: data.score, 
+        updatedTopic: data.updatedTopic,
+        mentorFeedback: data.mentorFeedback 
+      });
       setCurrentRecommendation(data.recommendation);
-      
       if (data.logs) addLog(data.logs);
       
       // Refresh profile and analytics with current filters
@@ -593,6 +598,88 @@ export default function App() {
                       </div>
                     </div>
 
+                    {/* AI Mentor Feedback Card */}
+                    {quizResult.mentorFeedback && (
+                      <div className={cn(
+                        "rounded-3xl p-8 shadow-sm border text-left space-y-6",
+                        darkMode ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"
+                      )}>
+                        <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 bg-indigo-100 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 rounded-full flex items-center justify-center">
+                            <Sparkles className="w-5 h-5" />
+                          </div>
+                          <h3 className="text-xl font-bold">AI Mentor Feedback</h3>
+                        </div>
+
+                        <div className="space-y-6">
+                          <div className="space-y-2">
+                            <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Summary</p>
+                            <p className={cn(
+                              "text-sm leading-relaxed",
+                              darkMode ? "text-slate-300" : "text-slate-600"
+                            )}>
+                              {quizResult.mentorFeedback.summary}
+                            </p>
+                          </div>
+
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            <div className="space-y-3">
+                              <p className="text-[10px] font-bold text-green-500 uppercase tracking-wider flex items-center gap-1.5">
+                                <CheckCircle2 className="w-3 h-3" />
+                                Strengths
+                              </p>
+                              <ul className="space-y-2">
+                                {quizResult.mentorFeedback.strengths.map((s, i) => (
+                                  <li key={i} className="flex gap-2 text-sm">
+                                    <span className="text-green-500 font-bold">•</span>
+                                    <span className={darkMode ? "text-slate-400" : "text-slate-600"}>{s}</span>
+                                  </li>
+                                ))}
+                              </ul>
+                            </div>
+
+                            <div className="space-y-3">
+                              <p className="text-[10px] font-bold text-amber-500 uppercase tracking-wider flex items-center gap-1.5">
+                                <AlertCircle className="w-3 h-3" />
+                                Areas for Improvement
+                              </p>
+                              <ul className="space-y-2">
+                                {quizResult.mentorFeedback.weaknesses.map((w, i) => (
+                                  <li key={i} className="flex gap-2 text-sm">
+                                    <span className="text-amber-500 font-bold">•</span>
+                                    <span className={darkMode ? "text-slate-400" : "text-slate-600"}>{w}</span>
+                                  </li>
+                                ))}
+                              </ul>
+                            </div>
+                          </div>
+
+                          <div className={cn(
+                            "p-6 rounded-2xl border space-y-4",
+                            darkMode ? "bg-slate-800/50 border-slate-700" : "bg-slate-50 border-slate-100"
+                          )}>
+                            <p className="text-[10px] font-bold text-indigo-500 uppercase tracking-wider flex items-center gap-1.5">
+                              <ArrowRightCircle className="w-3 h-3" />
+                              Next Steps
+                            </p>
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                              {quizResult.mentorFeedback.nextSteps.map((step, i) => (
+                                <div key={i} className={cn(
+                                  "p-4 rounded-xl border flex items-start gap-3",
+                                  darkMode ? "bg-slate-900 border-slate-700" : "bg-white border-slate-200"
+                                )}>
+                                  <span className="w-5 h-5 rounded-full bg-indigo-100 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 flex items-center justify-center text-[10px] font-bold shrink-0">
+                                    {i + 1}
+                                  </span>
+                                  <p className="text-xs leading-relaxed">{step}</p>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
                     {currentRecommendation && (
                       <div className="space-y-6">
                         <div className={cn(
@@ -685,7 +772,7 @@ export default function App() {
                       </button>
                     </div>
                   </div>
-                  
+
                   {showReview && currentQuiz && (
                     <motion.div 
                       initial={{ opacity: 0, height: 0 }}
@@ -859,7 +946,7 @@ export default function App() {
                   </div>
                 </div>
               )}
-
+              
               {analytics ? (
                 <div className="space-y-6">
                   <div className="grid grid-cols-2 gap-4">

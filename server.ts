@@ -10,6 +10,7 @@ import { LearnerAgent } from "./src/agents/learnerAgent";
 import { StrategyAgent } from "./src/agents/strategyAgent";
 import { AssessmentAgent } from "./src/agents/assessmentAgent";
 import { AnalyticsAgent } from "./src/agents/analyticsAgent";
+import { MentorAgent } from "./src/agents/mentorAgent";
 
 async function startServer() {
   const app = express();
@@ -32,6 +33,7 @@ async function startServer() {
   const strategyAgent = new StrategyAgent();
   const assessmentAgent = new AssessmentAgent();
   const analyticsAgent = new AnalyticsAgent();
+  const mentorAgent = new MentorAgent();
 
   // API Routes
   app.get("/api/students", async (req, res) => {
@@ -126,17 +128,29 @@ async function startServer() {
 
       const profile = await learnerAgent.getProfile(name);
       const analytics = analyticsAgent.analyze(profile);
+      
+      const mentorFeedback = await mentorAgent.generateFeedback(
+        name,
+        topic,
+        score,
+        quiz,
+        answers,
+        updatedTopic,
+        analytics
+      );
 
       res.json({
         score,
         updatedTopic,
         recommendation,
         analytics,
+        mentorFeedback,
         logs: [
           ...assessmentAgent.getLogs(),
           ...learnerAgent.getLogs(),
           ...strategyAgent.getLogs(),
           ...analyticsAgent.getLogs(),
+          ...mentorAgent.getLogs()
         ],
       });
 
@@ -144,6 +158,7 @@ async function startServer() {
       learnerAgent.clearLogs();
       strategyAgent.clearLogs();
       analyticsAgent.clearLogs();
+      mentorAgent.clearLogs();
     } catch (error) {
       console.error("Error submitting quiz:", error);
       res.status(500).json({ error: "Internal Server Error" });
