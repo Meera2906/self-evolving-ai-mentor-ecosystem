@@ -469,6 +469,57 @@ export default function App() {
                       </table>
                     </div>
                   </div>
+
+                  {/* Concept Insights */}
+                  {Object.entries(profile.topics).some(([_, data]) => (data as any).concepts && Object.keys((data as any).concepts).length > 0) && (
+                    <div className={cn(
+                      "rounded-3xl p-8 shadow-sm border space-y-6",
+                      darkMode ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"
+                    )}>
+                      <h2 className="text-xl font-bold flex items-center gap-2">
+                        <Sparkles className="w-6 h-6 text-amber-500" />
+                        Concept Insights
+                      </h2>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        {Object.entries(profile.topics).map(([topic, data]) => {
+                          const topicData = data as any;
+                          if (!topicData.concepts || Object.keys(topicData.concepts).length === 0) return null;
+                          
+                          return (
+                            <div key={topic} className="space-y-4">
+                              <h3 className="text-sm font-bold uppercase tracking-widest text-slate-500">{topic} Concepts</h3>
+                              <div className="space-y-3">
+                                {Object.values(topicData.concepts).map((concept: any) => (
+                                  <div key={concept.concept} className="space-y-1.5">
+                                    <div className="flex justify-between text-xs">
+                                      <span className="font-medium">{concept.concept}</span>
+                                      <span className={cn(
+                                        "font-bold",
+                                        concept.accuracy < 60 ? "text-rose-500" : concept.accuracy < 80 ? "text-amber-500" : "text-emerald-500"
+                                      )}>{concept.accuracy}%</span>
+                                    </div>
+                                    <div className={cn(
+                                      "h-1.5 w-full rounded-full overflow-hidden",
+                                      darkMode ? "bg-slate-800" : "bg-slate-100"
+                                    )}>
+                                      <motion.div 
+                                        initial={{ width: 0 }}
+                                        animate={{ width: `${concept.accuracy}%` }}
+                                        className={cn(
+                                          "h-full rounded-full",
+                                          concept.accuracy < 60 ? "bg-rose-500" : concept.accuracy < 80 ? "bg-amber-500" : "bg-emerald-500"
+                                        )}
+                                      />
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
                 </motion.div>
               )}
 

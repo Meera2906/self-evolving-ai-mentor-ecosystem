@@ -53,17 +53,31 @@ export class LearnerAgent {
     return data[name];
   }
 
-  updateScore(name: string, topic: string, score: number) {
+  updateScore(name: string, topic: string, score: number, conceptResults: Record<string, { correct: number; total: number }>) {
     const data = this.readData();
     if (!data[name]) data[name] = { name, topics: {} };
     
     if (!data[name].topics[topic]) {
-      data[name].topics[topic] = { scores: [], mastery: 'Weak', attempts: 0 };
+      data[name].topics[topic] = { scores: [], mastery: 'Weak', attempts: 0, concepts: {} };
     }
 
     const topicData = data[name].topics[topic];
     topicData.scores.push(score);
     topicData.attempts += 1;
+
+    // Update concept performance
+    if (!topicData.concepts) topicData.concepts = {};
+    
+    Object.entries(conceptResults).forEach(([concept, result]) => {
+      if (!topicData.concepts![concept]) {
+        topicData.concepts![concept] = { concept, attempts: 0, correct: 0, accuracy: 0 };
+      }
+      
+      const cp = topicData.concepts![concept];
+      cp.attempts += result.total;
+      cp.correct += result.correct;
+      cp.accuracy = Math.round((cp.correct / cp.attempts) * 100);
+    });
 
     const avg = topicData.scores.reduce((a, b) => a + b, 0) / topicData.scores.length;
     
@@ -77,6 +91,7 @@ export class LearnerAgent {
     this.log(`Topic: ${topic}`);
     this.log(`Score: ${score}`);
     this.log(`Mastery Updated: ${newMastery}`);
+    this.log(`Concepts Updated: ${Object.keys(conceptResults).join(', ')}`);
     
     this.saveData(data);
     return topicData;

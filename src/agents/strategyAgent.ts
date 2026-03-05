@@ -73,32 +73,56 @@ export class StrategyAgent {
     this.logs = [];
   }
 
-  recommend(topic: string, mastery: MasteryLevel): Recommendation {
+  recommend(topic: string, topicData: any): Recommendation {
+    const mastery = topicData.mastery as MasteryLevel;
     this.log(`Mastery Level Detected: ${mastery}`);
     
     let mode = '';
     let explanation = '';
+    let weakConcepts: string[] = [];
 
-    switch (mastery) {
-      case 'Weak':
-        mode = 'Concept Explanation Mode';
-        explanation = 'Recommendation based on mastery level: Weak. We will focus on fundamental concepts and step-by-step breakdowns.';
-        break;
-      case 'Moderate':
-        mode = 'Practice Reinforcement Mode';
-        explanation = 'Recommendation based on mastery level: Moderate. You have a good grasp, let\'s solidify it with more varied practice problems.';
-        break;
-      case 'Strong':
-        mode = 'Advanced Challenge Mode';
-        explanation = 'Recommendation based on mastery level: Strong. You are ready for complex scenarios and high-level abstract thinking.';
-        break;
+    if (topicData.concepts) {
+      weakConcepts = Object.values(topicData.concepts as Record<string, any>)
+        .filter((c: any) => c.accuracy < 60)
+        .map((c: any) => c.concept);
     }
 
-    const recommendedVideos = this.videoLibrary[topic]?.[mastery] || this.videoLibrary['Coding']['Weak'];
+    if (weakConcepts.length > 0) {
+      mode = 'Targeted Concept Reinforcement';
+      explanation = `We've identified specific weaknesses in: ${weakConcepts.join(', ')}. Let's focus on these concepts to improve your overall ${topic} mastery.`;
+    } else {
+      switch (mastery) {
+        case 'Weak':
+          mode = 'Concept Explanation Mode';
+          explanation = 'Recommendation based on mastery level: Weak. We will focus on fundamental concepts and step-by-step breakdowns.';
+          break;
+        case 'Moderate':
+          mode = 'Practice Reinforcement Mode';
+          explanation = 'Recommendation based on mastery level: Moderate. You have a good grasp, let\'s solidify it with more varied practice problems.';
+          break;
+        case 'Strong':
+          mode = 'Advanced Challenge Mode';
+          explanation = 'Recommendation based on mastery level: Strong. You are ready for complex scenarios and high-level abstract thinking.';
+          break;
+      }
+    }
+
+    let recommendedVideos = [...(this.videoLibrary[topic]?.[mastery] || this.videoLibrary['Coding']['Weak'])];
     
+    // Add specific concept videos if available
+    if (weakConcepts.length > 0) {
+      weakConcepts.forEach(concept => {
+        recommendedVideos.unshift({
+          title: `${concept} Refresher & Practice`,
+          url: `https://youtube.com/results?search_query=${topic}+${concept}+tutorial`,
+          reason: `Targeted help for your struggle with ${concept}.`
+        });
+      });
+    }
+
     this.log(`Recommending ${recommendedVideos.length} videos for ${mastery} level`);
     this.log(`Recommended Mode: ${mode}`);
     
-    return { mode, explanation, recommendedVideos };
+    return { mode, explanation, recommendedVideos: recommendedVideos.slice(0, 5) };
   }
 }

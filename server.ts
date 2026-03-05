@@ -120,11 +120,11 @@ async function startServer() {
     try {
       const { name, topic, quiz, answers } = req.body;
 
-      const score = assessmentAgent.evaluate(quiz, answers);
+      const { score, conceptResults } = assessmentAgent.evaluate(quiz, answers);
 
-      const updatedTopic = await learnerAgent.updateScore(name, topic, score);
+      const updatedTopic = await learnerAgent.updateScore(name, topic, score, conceptResults);
 
-      const recommendation = strategyAgent.recommend(topic, updatedTopic.mastery);
+      const recommendation = strategyAgent.recommend(topic, updatedTopic);
 
       const profile = await learnerAgent.getProfile(name);
       const analytics = analyticsAgent.analyze(profile);
@@ -178,6 +178,13 @@ async function startServer() {
       - Each question must have exactly 4 options.
       - Include the index of the correct option as correctIndex (0-3).
       - Provide a short 1-line explanation for why the answer is correct.
+      - It must have a specific "concept" (sub-topic) within ${topic}.
+    
+    Example concepts for ${topic}:
+    - Math: Algebra, Fractions, Ratios, Percentages, Geometry
+    - Coding: Arrays, Loops, Functions, Recursion
+    - Aptitude: Logical reasoning, Pattern recognition, Data interpretation
+    - Mixed : Concepts can be mixed within the same topic like "Math" or "Coding"
 
       Return ONLY valid JSON in this exact format:
 
@@ -187,7 +194,8 @@ async function startServer() {
             "question": "...",
             "options": ["A", "B", "C", "D"],
             "correctIndex": 0,
-            "explanation": "..."
+            "explanation": "...",
+            "concept": "..."
           }
         ]
       }`;
