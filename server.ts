@@ -48,14 +48,34 @@ async function startServer() {
       const profile = await learnerAgent.getProfile(req.params.name);
       const analytics = analyticsAgent.analyze(profile);
 
-      res.json({
-        profile,
-        analytics,
-        logs: [...learnerAgent.getLogs(), ...analyticsAgent.getLogs()],
+      // Find weakest topic for personalized recommendation
+      let weakestTopic = 'Coding';
+      let lowestMastery = 'Strong';
+      
+      const topicEntries = Object.entries(profile.topics);
+      if (topicEntries.length > 0) {
+        // Simple priority: Weak > Moderate > Strong
+        const masteryPriority = { 'Weak': 0, 'Moderate': 1, 'Strong': 2 };
+        topicEntries.forEach(([topic, data]) => {
+          if (masteryPriority[data.mastery] < masteryPriority[lowestMastery]) {
+            lowestMastery = data.mastery;
+            weakestTopic = topic;
+          }
+        });
+      }
+      
+      const recommendation = strategyAgent.recommend(weakestTopic, lowestMastery as any);
+      
+      res.json({ 
+        profile, 
+        analytics, 
+        recommendation,
+        logs: [...learnerAgent.getLogs(), ...analyticsAgent.getLogs(), ...strategyAgent.getLogs()] 
       });
 
       learnerAgent.clearLogs();
       analyticsAgent.clearLogs();
+      strategyAgent.clearLogs();
     } catch (error) {
       console.error("Error fetching profile:", error);
       res.status(500).json({ error: "Internal Server Error" });

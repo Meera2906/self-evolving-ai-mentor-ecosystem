@@ -15,7 +15,8 @@ import {
   Award,
   Sun,
   Moon,
-  X
+  X,
+  PlayCircle
 } from 'lucide-react';
 import { 
   LineChart, 
@@ -87,7 +88,8 @@ export default function App() {
     const data = await res.json();
     setProfile(data.profile);
     setAnalytics(data.analytics);
-    addLog(data.logs);
+    if (data.recommendation) setCurrentRecommendation(data.recommendation);
+    if (data.logs) addLog(data.logs);
     setStep('topic');
     setLoading(false);
   };
@@ -910,6 +912,39 @@ export default function App() {
                     )}
                   </div>
                 </div>
+
+                {/* Personalized Recommendations */}
+                {currentRecommendation && currentRecommendation.recommendedVideos.length > 0 && (
+                  <div className="space-y-4">
+                    <h3 className="font-bold text-lg flex items-center gap-2">
+                      <Brain className="w-5 h-5 text-indigo-500" />
+                      Personalized Recommendations
+                    </h3>
+                    <div className="grid grid-cols-1 gap-3">
+                      {currentRecommendation.recommendedVideos.map((video, idx) => (
+                        <a 
+                          key={idx}
+                          href={video.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className={cn(
+                            "p-4 rounded-2xl border flex items-start gap-4 transition-all hover:scale-[1.01]",
+                            darkMode ? "bg-slate-800/30 border-slate-800 hover:bg-slate-800/50" : "bg-white border-slate-100 hover:bg-slate-50"
+                          )}
+                        >
+                          <div className="w-12 h-12 bg-indigo-50 dark:bg-indigo-900/20 rounded-xl flex items-center justify-center text-indigo-600 dark:text-indigo-400 shrink-0">
+                            <PlayCircle className="w-6 h-6" />
+                          </div>
+                          <div className="space-y-1">
+                            <p className="font-bold text-sm">{video.title}</p>
+                            <p className="text-xs text-slate-500 line-clamp-2">{video.reason}</p>
+                          </div>
+                          <ChevronRight className="w-4 h-4 text-slate-400 ml-auto shrink-0 self-center" />
+                        </a>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
 
               <div className="p-6 flex flex-col sm:flex-row gap-4 justify-center">
