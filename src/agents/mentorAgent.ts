@@ -20,7 +20,6 @@ export class MentorAgent {
 
   private safeJsonParse(text: string): MentorFeedback | null {
     try {
-      // If model returns extra text, attempt to extract JSON object
       const a = text.indexOf("{");
       const b = text.lastIndexOf("}");
       const jsonStr = a !== -1 && b !== -1 ? text.slice(a, b + 1) : text;
@@ -44,46 +43,40 @@ export class MentorAgent {
     const correctCount = quiz.questions.filter((q, i) => q.correctIndex === answers[i]).length;
     const incorrectCount = quiz.questions.length - correctCount;
 
-    // Keep it short; LLMs do better with compact, structured inputs
-    const questionOutcomes = quiz.questions.map((q, i) => ({
-      q: q.question,
-      correct: q.correctIndex,
-      chosen: answers[i],
-      isCorrect: q.correctIndex === answers[i],
-      explanation: (q as any).explanation ?? undefined,
-    }));
+    const weakConcepts = updatedTopic.concepts
+      ? Object.values(updatedTopic.concepts)
+          .filter((c: any) => c.accuracy < 60)
+          .map((c: any) => c.concept)
+      : [];
 
-    const system = `You are an AI learning mentor in an adaptive education platform.
-Return ONLY valid JSON with keys: summary, strengths, weaknesses, nextSteps.
-No markdown, no extra text. Be encouraging and practical.`;
+    const prompt = `
+As an AI Learning Mentor, provide structured feedback for a student who just completed a quiz.
 
-    const user = {
-      studentName: name,
-      topic,
-      currentQuiz: {
-        scorePercent: score,
-        totalQuestions: quiz.questions.length,
-        correctCount,
-        incorrectCount,
-      },
-      mastery: {
-        level: updatedTopic.mastery,
-        attemptsOnTopic: updatedTopic.attempts,
-        recentScores: updatedTopic.scores?.slice(-5) ?? [],
-      },
-      analytics: {
-        averageScore: analytics.averageScore,
-        totalAttempts: analytics.totalAttempts,
-        trend: analytics.trend,
-      },
-      outcomes: questionOutcomes,
-      requiredJsonFormat: {
-        summary: "Short 1-2 sentence evaluation",
-        strengths: ["2-3 items"],
-        weaknesses: ["2-3 items"],
-        nextSteps: ["3 actionable items"],
-      },
-    };
+Student Name: ${name}
+Topic: ${topic}
+Current Quiz Score: ${score}% (${correctCount} correct, ${incorrectCount} incorrect)
+Current Mastery Level: ${updatedTopic.mastery}
+Total Attempts on this topic: ${updatedTopic.attempts}
+
+Weak Concepts Identified:
+${weakConcepts.length > 0 ? weakConcepts.join(", ") : "None specifically identified yet."}
+
+Concept Performance Breakdown:
+${JSON.stringify(updatedTopic.concepts || {})}
+
+Quiz Details:
+${quiz.questions
+  .map((q, i) => `Q: ${q.question} | Correct: ${q.correctIndex === answers[i]}`)
+  .join("\n")}
+
+Return ONLY valid JSON in exactly this format (no markdown, no extra text):
+{
+  "summary": "Short overall evaluation of the student's performance.",
+  "strengths": ["2–3 things the student did well"],
+  "weaknesses": ["2–3 areas where the student needs improvement"],
+  "nextSteps": ["3 actionable recommendations to improve learning"]
+}
+`;
 
     try {
       const openrouter = new OpenAI({
@@ -93,13 +86,16 @@ No markdown, no extra text. Be encouraging and practical.`;
 
       const resp = await openrouter.chat.completions.create(
         {
-          model: "google/gemini-2.0-flash-001", // ✅ change if you want
+          model: "google/gemini-2.0-flash-001", // pick any OpenRouter model id you know works
           messages: [
-            { role: "system", content: system },
-            { role: "user", content: JSON.stringify(user) },
+            {
+              role: "system",
+              content:
+                "You are an AI learning mentor. Return ONLY valid JSON with keys: summary, strengths, weaknesses, nextSteps. No markdown.",
+            },
+            { role: "user", content: prompt },
           ],
-          // Best-effort JSON enforcement (supported by many models/routes)
-          response_format: { type: "json_object" },
+          response_format: { type: "json_object" }, // best-effort JSON enforcement
           temperature: 0.4,
         },
         {
@@ -111,17 +107,17 @@ No markdown, no extra text. Be encouraging and practical.`;
       );
 
       const text = resp.choices?.[0]?.message?.content ?? "{}";
-      const parsed = this.safeJsonParse(text);
+      const feedback = this.safeJsonParse(text);
 
       if (
-        parsed &&
-        typeof parsed.summary === "string" &&
-        Array.isArray(parsed.strengths) &&
-        Array.isArray(parsed.weaknesses) &&
-        Array.isArray(parsed.nextSteps)
+        feedback &&
+        typeof feedback.summary === "string" &&
+        Array.isArray(feedback.strengths) &&
+        Array.isArray(feedback.weaknesses) &&
+        Array.isArray(feedback.nextSteps)
       ) {
         this.log("Feedback generated successfully");
-        return parsed;
+        return feedback;
       }
 
       throw new Error("Invalid mentor feedback JSON");
@@ -131,8 +127,8 @@ No markdown, no extra text. Be encouraging and practical.`;
       return {
         summary: `You scored ${score}% on ${topic}. Your current mastery is ${updatedTopic.mastery}.`,
         strengths: ["Completed the assessment", "Engaged with the learning material"],
-        weaknesses: ["Needs more practice to improve consistency"],
-        nextSteps: ["Review the incorrect answers", "Try another quiz at the right difficulty", "Practice focused questions on weak areas"],
+        weaknesses: ["Needs more practice to improve score"],
+        nextSteps: ["Review the incorrect answers", "Try another quiz", "Watch recommended videos"],
       };
     }
   }

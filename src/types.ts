@@ -1,9 +1,17 @@
 export type MasteryLevel = 'Weak' | 'Moderate' | 'Strong';
 
+export interface ConceptPerformance {
+  concept: string;
+  attempts: number;
+  correct: number;
+  accuracy: number;
+}
+
 export interface TopicData {
   scores: number[];
   mastery: MasteryLevel;
   attempts: number;
+  concepts?: Record<string, ConceptPerformance>;
 }
 
 export interface StudentProfile {
@@ -22,6 +30,7 @@ export interface QuizQuestion {
   options: string[];
   correctIndex: number;
   explanation: string;
+  concept: string;
 }
 
 export interface Quiz {

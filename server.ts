@@ -6,6 +6,8 @@ import express from "express";
 import { createServer as createViteServer } from "vite";
 import OpenAI from "openai";
 
+import { prisma } from "./src/db";
+
 import { LearnerAgent } from "./src/agents/learnerAgent";
 import { StrategyAgent } from "./src/agents/strategyAgent";
 import { AssessmentAgent } from "./src/agents/assessmentAgent";
@@ -28,14 +30,12 @@ async function startServer() {
     return a !== -1 && b !== -1 ? s.slice(a, b + 1) : '{"questions":[]}';
   }
   
-  // Initialize Agents
   const learnerAgent = new LearnerAgent();
   const strategyAgent = new StrategyAgent();
   const assessmentAgent = new AssessmentAgent();
   const analyticsAgent = new AnalyticsAgent();
   const mentorAgent = new MentorAgent();
 
-  // API Routes
   app.get("/api/students", async (req, res) => {
     try {
       res.json(await learnerAgent.getAllStudents());
@@ -50,7 +50,6 @@ async function startServer() {
       const { topic, topics } = req.query;
       const profile = await learnerAgent.getProfile(req.params.name);
       
-      // Filter profile topics if requested
       let filteredTopics = { ...profile.topics };
       if (topic === 'Mixed' && typeof topics === 'string') {
         const selectedTopics = topics.split(',');
@@ -66,13 +65,11 @@ async function startServer() {
       const filteredProfile = { ...profile, topics: filteredTopics };
       const analytics = analyticsAgent.analyze(filteredProfile);
 
-      // Find weakest topic for personalized recommendation (always use full profile for this)
       let weakestTopic = 'Coding';
       let lowestMastery = 'Strong';
       
       const topicEntries = Object.entries(profile.topics);
       if (topicEntries.length > 0) {
-        // Simple priority: Weak > Moderate > Strong
         const masteryPriority = { 'Weak': 0, 'Moderate': 1, 'Strong': 2 };
         topicEntries.forEach(([topic, data]) => {
           if (masteryPriority[data.mastery] < masteryPriority[lowestMastery]) {
@@ -120,11 +117,60 @@ async function startServer() {
     try {
       const { name, topic, quiz, answers } = req.body;
 
-      const score = assessmentAgent.evaluate(quiz, answers);
+      const { score, conceptResults } = assessmentAgent.evaluate(quiz, answers);
 
-      const updatedTopic = await learnerAgent.updateScore(name, topic, score);
+      const student = await prisma.student.upsert({
+        where: { name },
+        update: {},
+        create: { name },
+        select: { id: true }
+      });
 
-      const recommendation = strategyAgent.recommend(topic, updatedTopic.mastery);
+      const quizRow = await prisma.$transaction(async (tx) => {
+        const createdQuiz = await tx.quiz.create({
+          data: {
+            studentId: student.id,
+            topic,
+            difficulty: "unknown"
+          }
+        });
+
+        const createdQuestions = [];
+        for (let i = 0; i < quiz.questions.length; i++) {
+          const q = quiz.questions[i];
+          const createdQ = await tx.question.create({
+            data: {
+              quizId: createdQuiz.id,
+              question: q.question,
+              options: q.options,
+              correctIndex: q.correctIndex,
+              explanation: (q as any).explanation ?? ""
+            },
+            select: { id: true }
+          });
+          createdQuestions.push(createdQ);
+        }
+
+        for (let i = 0; i < createdQuestions.length; i++) {
+          const questionId = createdQuestions[i].id;
+          const selectedIndex = answers[i];
+          const isCorrect = quiz.questions[i].correctIndex === selectedIndex;
+
+          await tx.studentAnswer.create({
+            data: {
+              questionId,
+              selectedIndex,
+              isCorrect
+            }
+          });
+        }
+
+        return createdQuiz;
+      });
+
+      const updatedTopic = await learnerAgent.updateScore(name, topic, score, conceptResults);
+
+      const recommendation = strategyAgent.recommend(topic, updatedTopic);
 
       const profile = await learnerAgent.getProfile(name);
       const analytics = analyticsAgent.analyze(profile);
@@ -145,6 +191,7 @@ async function startServer() {
         recommendation,
         analytics,
         mentorFeedback,
+        quizId: quizRow.id,
         logs: [
           ...assessmentAgent.getLogs(),
           ...learnerAgent.getLogs(),
@@ -178,6 +225,13 @@ async function startServer() {
       - Each question must have exactly 4 options.
       - Include the index of the correct option as correctIndex (0-3).
       - Provide a short 1-line explanation for why the answer is correct.
+      - It must have a specific "concept" (sub-topic) within ${topic}.
+    
+    Example concepts for ${topic}:
+    - Math: Algebra, Fractions, Ratios, Percentages, Geometry
+    - Coding: Arrays, Loops, Functions, Recursion
+    - Aptitude: Logical reasoning, Pattern recognition, Data interpretation
+    - Mixed : Concepts can be mixed within the same topic like "Math" or "Coding"
 
       Return ONLY valid JSON in this exact format:
 
@@ -187,7 +241,8 @@ async function startServer() {
             "question": "...",
             "options": ["A", "B", "C", "D"],
             "correctIndex": 0,
-            "explanation": "..."
+            "explanation": "...",
+            "concept": "..."
           }
         ]
       }`;
@@ -215,7 +270,6 @@ async function startServer() {
     }
   });
 
-  // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
       server: { middlewareMode: true },
