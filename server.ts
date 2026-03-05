@@ -2,9 +2,6 @@ import { config } from 'dotenv';
 config({ path: ".env" });
 config({ path: ".env.local", override: true });
 
-console.log("OPENROUTER_API_KEY loaded?", Boolean(process.env.OPENROUTER_API_KEY));
-console.log("OPENROUTER_API_KEY prefix:", process.env.OPENROUTER_API_KEY?.slice(0, 10));
-
 import express from "express";
 import { createServer as createViteServer } from "vite";
 import OpenAI from "openai";
@@ -37,40 +34,21 @@ async function startServer() {
   const analyticsAgent = new AnalyticsAgent();
 
   // API Routes
-  app.get("/api/students", (req, res) => {
+  app.get("/api/students", async (req, res) => {
     try {
-      res.json(learnerAgent.getAllStudents());
+      res.json(await learnerAgent.getAllStudents());
     } catch (error) {
       console.error("Error fetching students:", error);
       res.status(500).json({ error: "Internal Server Error" });
     }
   });
 
-  app.get("/api/profile/:name", (req, res) => {
+  app.get("/api/profile/:name", async (req, res) => {
     try {
-      const profile = learnerAgent.getProfile(req.params.name);
-      const analytics = analyticsAgent.analyze(profile);
-      res.json({ profile, analytics, logs: [...learnerAgent.getLogs(), ...analyticsAgent.getLogs()] });
-      const { topic, topics } = req.query;
       const profile = await learnerAgent.getProfile(req.params.name);
-      
-      // Filter profile topics if requested
-      let filteredTopics = { ...profile.topics };
-      if (topic === 'Mixed' && typeof topics === 'string') {
-        const selectedTopics = topics.split(',');
-        filteredTopics = Object.fromEntries(
-          Object.entries(profile.topics).filter(([t]) => selectedTopics.includes(t))
-        );
-      } else if (topic && topic !== 'Overall' && topic !== 'Mixed') {
-        filteredTopics = Object.fromEntries(
-          Object.entries(profile.topics).filter(([t]) => t === topic)
-        );
-      }
+      const analytics = analyticsAgent.analyze(profile);
 
-      const filteredProfile = { ...profile, topics: filteredTopics };
-      const analytics = analyticsAgent.analyze(filteredProfile);
-
-      // Find weakest topic for personalized recommendation (always use full profile for this)
+      // Find weakest topic for personalized recommendation
       let weakestTopic = 'Coding';
       let lowestMastery = 'Strong';
       
@@ -120,14 +98,17 @@ async function startServer() {
     }
   });
 
-  app.post("/api/quiz/submit", (req, res) => {
+  app.post("/api/quiz/submit", async (req, res) => {
     try {
       const { name, topic, quiz, answers } = req.body;
-      
+
       const score = assessmentAgent.evaluate(quiz, answers);
-      const updatedTopic = learnerAgent.updateScore(name, topic, score);
+
+      const updatedTopic = await learnerAgent.updateScore(name, topic, score);
+
       const recommendation = strategyAgent.recommend(topic, updatedTopic.mastery);
-      const profile = learnerAgent.getProfile(name);
+
+      const profile = await learnerAgent.getProfile(name);
       const analytics = analyticsAgent.analyze(profile);
 
       res.json({
@@ -139,8 +120,8 @@ async function startServer() {
           ...assessmentAgent.getLogs(),
           ...learnerAgent.getLogs(),
           ...strategyAgent.getLogs(),
-          ...analyticsAgent.getLogs()
-        ]
+          ...analyticsAgent.getLogs(),
+        ],
       });
 
       assessmentAgent.clearLogs();
