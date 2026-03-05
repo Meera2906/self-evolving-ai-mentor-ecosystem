@@ -57,6 +57,7 @@ export default function App() {
   const [answers, setAnswers] = useState<number[]>([]);
   const [quizResult, setQuizResult] = useState<{ score: number; updatedTopic: any } | null>(null);
   const [darkMode, setDarkMode] = useState(false);
+  const [showReview, setShowReview] = useState(false);
   const [showProfileSummary, setShowProfileSummary] = useState(false);
 
   const logEndRef = useRef<HTMLDivElement>(null);
@@ -90,6 +91,7 @@ export default function App() {
     setAnalytics(data.analytics);
     if (data.recommendation) setCurrentRecommendation(data.recommendation);
     if (data.logs) addLog(data.logs);
+    setShowReview(false);
     setStep('topic');
     setLoading(false);
   };
@@ -120,6 +122,7 @@ export default function App() {
       setCurrentQuiz(quiz);
       setCurrentRecommendation(data.recommendation);
       setAnswers(new Array(quiz.questions.length).fill(-1));
+      setShowReview(false);
       
       const aiLogs = [
         `[Assessment Agent] Generating adaptive quiz using Gemini AI`,
@@ -623,8 +626,95 @@ export default function App() {
                       >
                         Retake Quiz
                       </button>
+                      <button
+                        onClick={() => setShowReview(!showReview)}
+                        className={cn(
+                          "border px-8 py-3 rounded-2xl font-bold transition-all",
+                          darkMode 
+                            ? "bg-slate-800 border-slate-700 text-slate-400 hover:bg-slate-700" 
+                            : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"
+                        )}
+                      >
+                        {showReview ? 'Hide Review' : 'Review Answers'}
+                      </button>
                     </div>
                   </div>
+                  
+                  {showReview && currentQuiz && (
+                    <motion.div 
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: 'auto' }}
+                      className={cn(
+                        "rounded-3xl p-8 shadow-sm border space-y-8",
+                        darkMode ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"
+                      )}
+                    >
+                      <h2 className="text-xl font-bold flex items-center gap-2">
+                        <BookOpen className="w-6 h-6 text-indigo-500" />
+                        Detailed Review
+                      </h2>
+                      <div className="space-y-6">
+                        {currentQuiz.questions.map((q, qIdx) => {
+                          const isCorrect = answers[qIdx] === q.correctIndex;
+                          return (
+                            <div key={qIdx} className={cn(
+                              "p-6 rounded-2xl border space-y-4",
+                              darkMode ? "bg-slate-800/50 border-slate-700" : "bg-slate-50 border-slate-100"
+                            )}>
+                              <div className="flex items-start gap-3">
+                                <div className={cn(
+                                  "w-6 h-6 rounded-full flex items-center justify-center shrink-0 mt-1",
+                                  isCorrect ? "bg-green-100 text-green-600" : "bg-red-100 text-red-600"
+                                )}>
+                                  {isCorrect ? <CheckCircle2 className="w-4 h-4" /> : <X className="w-4 h-4" />}
+                                </div>
+                                <p className="font-bold">{qIdx + 1}. {q.question}</p>
+                              </div>
+                              
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 ml-9">
+                                {q.options.map((opt, oIdx) => {
+                                  const isUserChoice = answers[qIdx] === oIdx;
+                                  const isCorrectChoice = q.correctIndex === oIdx;
+                                  
+                                  return (
+                                    <div 
+                                      key={oIdx}
+                                      className={cn(
+                                        "p-3 rounded-xl border text-sm flex items-center gap-2",
+                                        isCorrectChoice 
+                                          ? "bg-green-100/50 border-green-200 text-green-700 dark:bg-green-900/20 dark:border-green-800 dark:text-green-400"
+                                          : isUserChoice && !isCorrect
+                                            ? "bg-red-100/50 border-red-200 text-red-700 dark:bg-red-900/20 dark:border-red-800 dark:text-red-400"
+                                            : darkMode ? "bg-slate-800 border-slate-700 text-slate-400" : "bg-white border-slate-100 text-slate-500"
+                                      )}
+                                    >
+                                      <div className={cn(
+                                        "w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold shrink-0",
+                                        isCorrectChoice ? "bg-green-500 text-white" : "bg-slate-200 dark:bg-slate-700 text-slate-500"
+                                      )}>
+                                        {String.fromCharCode(65 + oIdx)}
+                                      </div>
+                                      {opt}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+
+                              <div className={cn(
+                                "ml-9 p-4 rounded-xl border flex gap-3",
+                                darkMode ? "bg-indigo-900/10 border-indigo-900/30" : "bg-indigo-50 border-indigo-100"
+                              )}>
+                                <AlertCircle className="w-4 h-4 text-indigo-500 shrink-0 mt-0.5" />
+                                <p className="text-xs text-indigo-600 dark:text-indigo-400 leading-relaxed">
+                                  <span className="font-bold">Explanation:</span> {q.explanation}
+                                </p>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </motion.div>
+                  )}
 
                   {/* Agent Collaboration Summary */}
                   <div className={cn(
