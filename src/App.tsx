@@ -59,6 +59,8 @@ export default function App() {
   const [darkMode, setDarkMode] = useState(false);
   const [showReview, setShowReview] = useState(false);
   const [showProfileSummary, setShowProfileSummary] = useState(false);
+  const [filterTopic, setFilterTopic] = useState('Overall');
+  const [selectedMixedTopics, setSelectedMixedTopics] = useState<string[]>(TOPICS);
 
   const logEndRef = useRef<HTMLDivElement>(null);
 
@@ -85,7 +87,12 @@ export default function App() {
   const handleSelectStudent = async (name: string) => {
     setLoading(true);
     setSelectedStudent(name);
-    const res = await fetch(`/api/profile/${name}`);
+
+    // Reset filters when selecting a new student
+    setFilterTopic('Overall');
+    setSelectedMixedTopics(TOPICS);
+    
+    const res = await fetch(`/api/profile/${name}?topic=Overall`);
     const data = await res.json();
     setProfile(data.profile);
     setAnalytics(data.analytics);
@@ -94,6 +101,40 @@ export default function App() {
     setShowReview(false);
     setStep('topic');
     setLoading(false);
+  };
+
+  const handleFilterChange = async (topic: string) => {
+    setFilterTopic(topic);
+    if (selectedStudent) {
+      setLoading(true);
+      let url = `/api/profile/${selectedStudent}?topic=${topic}`;
+      if (topic === 'Mixed') {
+        url += `&topics=${selectedMixedTopics.join(',')}`;
+      }
+      const res = await fetch(url);
+      const data = await res.json();
+      setAnalytics(data.analytics);
+      if (data.logs) addLog(data.logs);
+      setLoading(false);
+    }
+  };
+
+  const toggleMixedTopic = async (topic: string) => {
+    const newMixed = selectedMixedTopics.includes(topic)
+      ? selectedMixedTopics.filter(t => t !== topic)
+      : [...selectedMixedTopics, topic];
+    
+    setSelectedMixedTopics(newMixed);
+    
+    if (selectedStudent && filterTopic === 'Mixed') {
+      setLoading(true);
+      const url = `/api/profile/${selectedStudent}?topic=Mixed&topics=${newMixed.join(',')}`;
+      const res = await fetch(url);
+      const data = await res.json();
+      setAnalytics(data.analytics);
+      if (data.logs) addLog(data.logs);
+      setLoading(false);
+    }
   };
 
   const handleStartQuiz = async (topic: string) => {
@@ -166,14 +207,19 @@ export default function App() {
       const data = await res.json();
       setQuizResult({ score: data.score, updatedTopic: data.updatedTopic });
       setCurrentRecommendation(data.recommendation);
-      setAnalytics(data.analytics);
+      
       if (data.logs) addLog(data.logs);
       
-      // Refresh profile
-      const profileRes = await fetch(`/api/profile/${selectedStudent}`);
+      // Refresh profile and analytics with current filters
+      let url = `/api/profile/${selectedStudent}?topic=${filterTopic}`;
+      if (filterTopic === 'Mixed') {
+        url += `&topics=${selectedMixedTopics.join(',')}`;
+      }
+      const profileRes = await fetch(url);
       if (profileRes.ok) {
         const profileData = await profileRes.json();
         setProfile(profileData.profile);
+        setAnalytics(profileData.analytics);
       }
       
       setStep('result');
@@ -761,6 +807,59 @@ export default function App() {
                 Performance Summary
               </h2>
               
+              {/* Filter Buttons */}
+              <div className="flex flex-wrap gap-2">
+                {['Overall', 'Math', 'Coding', 'Aptitude', 'Mixed'].map((topic) => (
+                  <button
+                    key={topic}
+                    onClick={() => handleFilterChange(topic)}
+                    className={cn(
+                      "px-3 py-1.5 rounded-xl text-[10px] font-bold transition-all border uppercase tracking-wider",
+                      filterTopic === topic
+                        ? "bg-indigo-600 border-indigo-600 text-white"
+                        : darkMode 
+                          ? "bg-slate-800 border-slate-700 text-slate-400 hover:bg-slate-700" 
+                          : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"
+                    )}
+                  >
+                    {topic}
+                  </button>
+                ))}
+              </div>
+
+              {/* Mixed Selection UI */}
+              {filterTopic === 'Mixed' && (
+                <div className={cn(
+                  "p-4 rounded-2xl border space-y-3",
+                  darkMode ? "bg-slate-800/50 border-slate-700" : "bg-slate-50 border-slate-100"
+                )}>
+                  <p className="text-[10px] font-bold text-slate-500 uppercase">Include Topics</p>
+                  <div className="flex flex-wrap gap-4">
+                    {TOPICS.map((topic) => (
+                      <label key={topic} className="flex items-center gap-2 cursor-pointer group">
+                        <div 
+                          onClick={() => toggleMixedTopic(topic)}
+                          className={cn(
+                            "w-4 h-4 rounded border flex items-center justify-center transition-all",
+                            selectedMixedTopics.includes(topic)
+                              ? "bg-indigo-600 border-indigo-600"
+                              : darkMode ? "bg-slate-900 border-slate-700" : "bg-white border-slate-300"
+                          )}
+                        >
+                          {selectedMixedTopics.includes(topic) && <CheckCircle2 className="w-3 h-3 text-white" />}
+                        </div>
+                        <span className={cn(
+                          "text-xs font-medium",
+                          selectedMixedTopics.includes(topic)
+                            ? (darkMode ? "text-slate-200" : "text-slate-900")
+                            : "text-slate-500"
+                        )}>{topic}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {analytics ? (
                 <div className="space-y-6">
                   <div className="grid grid-cols-2 gap-4">
