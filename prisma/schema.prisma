@@ -8,10 +8,11 @@ generator client {
 }
 
 model Student {
-  id       String         @id @default(uuid())
-  name     String         @unique
+  id       String          @id @default(uuid())
+  name     String          @unique
   attempts Attempt[]
   progress TopicProgress[]
+  quizzes  Quiz[]
 }
 
 model Attempt {
@@ -38,4 +39,38 @@ model TopicProgress {
   student Student @relation(fields: [studentId], references: [id])
 
   @@unique([studentId, topic])
+}
+
+model Quiz {
+  id         String   @id @default(uuid())
+  studentId  String
+  topic      String
+  difficulty String
+  createdAt  DateTime @default(now())
+
+  student   Student    @relation(fields: [studentId], references: [id])
+  questions Question[]
+
+  @@index([studentId, topic])
+}
+
+model Question {
+  id           String   @id @default(uuid())
+  quizId       String
+  question     String
+  options      String[]
+  correctIndex Int
+  explanation  String
+
+  quiz    Quiz            @relation(fields: [quizId], references: [id])
+  answers StudentAnswer[]
+}
+
+model StudentAnswer {
+  id            String  @id @default(uuid())
+  questionId    String
+  selectedIndex Int
+  isCorrect     Boolean
+
+  question Question @relation(fields: [questionId], references: [id])
 }
