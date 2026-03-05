@@ -143,8 +143,24 @@ async function startServer() {
       const difficulty = difficultyMap[mastery] || "Easy";
 
       const prompt = `Generate a 5-question multiple choice quiz about ${topic} at ${difficulty} difficulty.
-  Return ONLY valid JSON:
-  {"questions":[{"question":"...","options":["A","B","C","D"],"correctIndex":0}]}`;
+
+      Rules:
+      - Each question must have exactly 4 options.
+      - Include the index of the correct option as correctIndex (0-3).
+      - Provide a short 1-line explanation for why the answer is correct.
+
+      Return ONLY valid JSON in this exact format:
+
+      {
+        "questions": [
+          {
+            "question": "...",
+            "options": ["A", "B", "C", "D"],
+            "correctIndex": 0,
+            "explanation": "..."
+          }
+        ]
+      }`;
 
       const resp = await openrouter.chat.completions.create(
         {
