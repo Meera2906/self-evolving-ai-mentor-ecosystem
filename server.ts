@@ -51,8 +51,26 @@ async function startServer() {
       const profile = learnerAgent.getProfile(req.params.name);
       const analytics = analyticsAgent.analyze(profile);
       res.json({ profile, analytics, logs: [...learnerAgent.getLogs(), ...analyticsAgent.getLogs()] });
+      const { topic, topics } = req.query;
+      const profile = await learnerAgent.getProfile(req.params.name);
+      
+      // Filter profile topics if requested
+      let filteredTopics = { ...profile.topics };
+      if (topic === 'Mixed' && typeof topics === 'string') {
+        const selectedTopics = topics.split(',');
+        filteredTopics = Object.fromEntries(
+          Object.entries(profile.topics).filter(([t]) => selectedTopics.includes(t))
+        );
+      } else if (topic && topic !== 'Overall' && topic !== 'Mixed') {
+        filteredTopics = Object.fromEntries(
+          Object.entries(profile.topics).filter(([t]) => t === topic)
+        );
+      }
 
-      // Find weakest topic for personalized recommendation
+      const filteredProfile = { ...profile, topics: filteredTopics };
+      const analytics = analyticsAgent.analyze(filteredProfile);
+
+      // Find weakest topic for personalized recommendation (always use full profile for this)
       let weakestTopic = 'Coding';
       let lowestMastery = 'Strong';
       
