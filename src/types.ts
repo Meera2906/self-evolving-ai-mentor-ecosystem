@@ -47,6 +47,13 @@ export interface AnalyticsData {
   progression: { attempt: number; score: number }[];
 }
 
+export interface MentorFeedback {
+  summary: string;
+  strengths: string[];
+  weaknesses: string[];
+  nextSteps: string[];
+}
+
 declare global {
   interface Window {
     aistudio: {
