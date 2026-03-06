@@ -41,7 +41,7 @@ function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-const TOPICS = ['Math', 'Coding', 'Aptitude'];
+const TOPICS = ['Math', 'Coding', 'Aptitude', 'Mixed'];
 
 export default function App() {
   const [students, setStudents] = useState<string[]>([]);
