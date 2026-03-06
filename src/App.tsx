@@ -51,13 +51,15 @@ export default function App() {
   const [analytics, setAnalytics] = useState<AnalyticsData | null>(null);
   const [logs, setLogs] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
-  const [step, setStep] = useState<'selection' | 'topic' | 'quiz' | 'result'>('selection');
+  const [step, setStep] = useState<'selection' | 'topic' | 'quiz' | 'result' | 'review'>('selection');
   
   const [currentTopic, setCurrentTopic] = useState('');
   const [currentQuiz, setCurrentQuiz] = useState<Quiz | null>(null);
   const [currentRecommendation, setCurrentRecommendation] = useState<Recommendation | null>(null);
   const [answers, setAnswers] = useState<number[]>([]);
   const [quizResult, setQuizResult] = useState<{ score: number; updatedTopic: any; mentorFeedback?: MentorFeedback } | null>(null);
+  const [quizzes, setQuizzes] = useState<any[]>([]);
+  const [selectedQuizForReview, setSelectedQuizForReview] = useState<any | null>(null);
   const [darkMode, setDarkMode] = useState(false);
   const [showReview, setShowReview] = useState(false);
   const [showProfileSummary, setShowProfileSummary] = useState(false);
@@ -100,6 +102,14 @@ export default function App() {
     setAnalytics(data.analytics);
     if (data.recommendation) setCurrentRecommendation(data.recommendation);
     if (data.logs) addLog(data.logs);
+    
+    // Fetch quizzes
+    const quizRes = await fetch(`/api/quizzes/${name}`);
+    if (quizRes.ok) {
+      const quizData = await quizRes.json();
+      setQuizzes(quizData);
+    }
+
     setShowReview(false);
     setStep('topic');
     setLoading(false);
@@ -215,6 +225,13 @@ export default function App() {
       setCurrentRecommendation(data.recommendation);
       if (data.logs) addLog(data.logs);
       
+      // Refresh quizzes
+      const quizRes = await fetch(`/api/quizzes/${selectedStudent}`);
+      if (quizRes.ok) {
+        const quizData = await quizRes.json();
+        setQuizzes(quizData);
+      }
+
       // Refresh profile and analytics with current filters
       let url = `/api/profile/${selectedStudent}?topic=${filterTopic}`;
       if (filterTopic === 'Mixed') {
@@ -231,6 +248,21 @@ export default function App() {
     } catch (error: any) {
       console.error('Failed to submit quiz:', error);
       alert(error.message || 'Failed to submit quiz. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleReviewQuiz = async (quizId: string) => {
+    setLoading(true);
+    try {
+      const res = await fetch(`/api/quiz/${selectedStudent}/${quizId}`);
+      if (!res.ok) throw new Error('Failed to fetch quiz details');
+      const data = await res.json();
+      setSelectedQuizForReview(data);
+      setStep('review');
+    } catch (error: any) {
+      alert(error.message);
     } finally {
       setLoading(false);
     }
@@ -520,6 +552,79 @@ export default function App() {
                       </div>
                     </div>
                   )}
+
+                  {/* Past Quizzes */}
+                  <div className={cn(
+                    "rounded-3xl p-8 shadow-sm border space-y-6",
+                    darkMode ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"
+                  )}>
+                    <h2 className="text-xl font-bold flex items-center gap-2">
+                      <History className="w-6 h-6 text-indigo-500" />
+                      Past Quizzes
+                    </h2>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left">
+                        <thead>
+                          <tr className={cn(
+                            "border-b text-xs uppercase tracking-wider",
+                            darkMode ? "border-slate-800 text-slate-500" : "border-slate-100 text-slate-400"
+                          )}>
+                            <th className="pb-4 font-semibold text-indigo-500">Topic</th>
+                            <th className="pb-4 font-semibold">Difficulty</th>
+                            <th className="pb-4 font-semibold">Date</th>
+                            <th className="pb-4 font-semibold">Score</th>
+                            <th className="pb-4 font-semibold">Action</th>
+                          </tr>
+                        </thead>
+                        <tbody className={cn(
+                          "divide-y",
+                          darkMode ? "divide-slate-800" : "divide-slate-50"
+                        )}>
+                          {quizzes.length === 0 ? (
+                            <tr>
+                              <td colSpan={5} className="py-8 text-center text-slate-500 italic">No quiz history yet.</td>
+                            </tr>
+                          ) : (
+                            [...quizzes].reverse().map((quiz) => (
+                              <tr key={quiz.id} className={cn(
+                                "group transition-colors",
+                                darkMode ? "hover:bg-slate-800/50" : "hover:bg-slate-50"
+                              )}>
+                                <td className="py-4 font-medium">{quiz.topic}</td>
+                                <td className="py-4 text-xs">
+                                  <span className={cn(
+                                    "px-2 py-0.5 rounded-full border",
+                                    quiz.difficulty === 'Weak' || quiz.difficulty === 'Beginner' ? "bg-blue-100 text-blue-700 border-blue-200" :
+                                    quiz.difficulty === 'Moderate' || quiz.difficulty === 'Intermediate' ? "bg-purple-100 text-purple-700 border-purple-200" :
+                                    "bg-orange-100 text-orange-700 border-orange-200"
+                                  )}>
+                                    {quiz.difficulty}
+                                  </span>
+                                </td>
+                                <td className="py-4 text-slate-500 text-sm">
+                                  {new Date(quiz.createdAt).toLocaleDateString()}
+                                </td>
+                                <td className="py-4">
+                                  <div className="flex flex-col">
+                                    <span className="font-mono text-indigo-500 font-bold">{Math.round(quiz.score)}%</span>
+                                    <span className="text-[10px] text-slate-400">{quiz.correctAnswers}/{quiz.totalQuestions} correct</span>
+                                  </div>
+                                </td>
+                                <td className="py-4">
+                                  <button 
+                                    onClick={() => handleReviewQuiz(quiz.id)}
+                                    className="text-indigo-500 hover:text-indigo-600 font-medium text-sm flex items-center gap-1 group"
+                                  >
+                                    Review <ChevronRight className="w-4 h-4 transition-transform group-hover:translate-x-1" />
+                                  </button>
+                                </td>
+                              </tr>
+                            ))
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
                 </motion.div>
               )}
 
@@ -924,6 +1029,132 @@ export default function App() {
                           <p className="text-sm font-medium">{item.msg}</p>
                         </div>
                       ))}
+                    </div>
+                  </div>
+                </motion.div>
+              )}
+
+              {step === 'review' && selectedQuizForReview && (
+                <motion.div 
+                  key="review"
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -20 }}
+                  className="space-y-6"
+                >
+                  <div className="flex items-center justify-between">
+                    <button 
+                      onClick={() => setStep('topic')}
+                      className="flex items-center gap-2 text-slate-500 hover:text-indigo-500 transition-colors"
+                    >
+                      <ArrowRightCircle className="w-5 h-5 rotate-180" />
+                      Back to Profile
+                    </button>
+                    <div className="text-right">
+                      <h2 className="text-2xl font-bold">{selectedQuizForReview.topic} Review</h2>
+                      <p className="text-slate-500 text-sm">{new Date(selectedQuizForReview.createdAt).toLocaleString()}</p>
+                    </div>
+                  </div>
+
+                  <div className={cn(
+                    "rounded-3xl p-8 shadow-sm border space-y-8",
+                    darkMode ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"
+                  )}>
+                    <div className="flex items-center justify-between border-b pb-6 border-slate-100 dark:border-slate-800">
+                      <div className="flex gap-8">
+                        <div>
+                          <p className="text-xs uppercase tracking-widest text-slate-400 font-bold mb-1">Score</p>
+                          <p className="text-3xl font-mono text-indigo-500 font-bold">{Math.round(selectedQuizForReview.score)}%</p>
+                        </div>
+                        <div>
+                          <p className="text-xs uppercase tracking-widest text-slate-400 font-bold mb-1">Accuracy</p>
+                          <p className="text-3xl font-mono text-slate-700 dark:text-slate-200 font-bold">
+                            {selectedQuizForReview.correctAnswers}/{selectedQuizForReview.totalQuestions}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-xs uppercase tracking-widest text-slate-400 font-bold mb-1">Difficulty</p>
+                        <span className="px-3 py-1 rounded-full bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 text-sm font-bold">
+                          {selectedQuizForReview.difficulty}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="space-y-12">
+                      {selectedQuizForReview.quiz.questions.map((q: any, qIdx: number) => {
+                        const selectedAns = selectedQuizForReview.answers[qIdx];
+                        const isCorrect = selectedAns === q.correctIndex;
+                        
+                        return (
+                          <div key={qIdx} className="space-y-6">
+                            <div className="flex items-start gap-4">
+                              <div className={cn(
+                                "w-8 h-8 rounded-full flex items-center justify-center shrink-0 font-bold text-sm mt-1",
+                                isCorrect 
+                                  ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400" 
+                                  : "bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-400"
+                              )}>
+                                {qIdx + 1}
+                              </div>
+                              <div className="space-y-4 w-full">
+                                <p className="text-lg font-medium leading-relaxed">{q.question}</p>
+                                
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                  {q.options.map((opt: string, oIdx: number) => {
+                                    const isSelected = selectedAns === oIdx;
+                                    const isCorrectOpt = q.correctIndex === oIdx;
+                                    
+                                    return (
+                                      <div
+                                        key={oIdx}
+                                        className={cn(
+                                          "p-4 rounded-xl border text-sm transition-all relative flex items-center justify-between",
+                                          isCorrectOpt 
+                                            ? "border-emerald-500 bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-300 font-medium"
+                                            : isSelected && !isCorrect
+                                              ? "border-rose-500 bg-rose-50 dark:bg-rose-900/20 text-rose-700 dark:text-rose-300"
+                                              : (darkMode ? "border-slate-800 bg-slate-800/30 text-slate-400" : "border-slate-100 bg-slate-50 text-slate-500")
+                                        )}
+                                      >
+                                        <span>{opt}</span>
+                                        {isCorrectOpt && <CheckCircle2 className="w-4 h-4 text-emerald-500" />}
+                                        {isSelected && !isCorrect && <X className="w-4 h-4 text-rose-500" />}
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+
+                                <div className={cn(
+                                  "p-4 rounded-2xl border text-sm space-y-2",
+                                  darkMode ? "bg-slate-800/50 border-slate-800" : "bg-slate-50 border-slate-100"
+                                )}>
+                                  <div className="flex items-center gap-2 font-bold text-indigo-500 uppercase tracking-widest text-[10px]">
+                                    <BookOpen className="w-3 h-3" />
+                                    Explanation
+                                  </div>
+                                  <p className="text-slate-600 dark:text-slate-400 leading-relaxed">
+                                    {q.explanation}
+                                  </p>
+                                  <div className="pt-2 flex items-center gap-2">
+                                    <span className="text-[10px] uppercase tracking-widest font-bold text-slate-400">Concept:</span>
+                                    <span className="text-[10px] font-bold text-indigo-400">{q.concept}</span>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    <div className="pt-8 border-t border-slate-100 dark:border-slate-800 flex justify-center">
+                      <button 
+                        onClick={() => setStep('topic')}
+                        className="px-8 py-3 rounded-2xl bg-indigo-600 text-white font-bold hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-500/20"
+                      >
+                        Done Reviewing
+                      </button>
                     </div>
                   </div>
                 </motion.div>

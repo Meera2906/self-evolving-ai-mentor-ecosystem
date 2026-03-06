@@ -1,4 +1,4 @@
-import { config } from 'dotenv';
+import { config } from "dotenv";
 config({ path: ".env" });
 config({ path: ".env.local", override: true });
 
@@ -14,11 +14,14 @@ import { AssessmentAgent } from "./src/agents/assessmentAgent";
 import { AnalyticsAgent } from "./src/agents/analyticsAgent";
 import { MentorAgent } from "./src/agents/mentorAgent";
 
+type MasteryLevel = "Weak" | "Moderate" | "Strong";
+
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+  const PORT = Number(process.env.PORT) || 3000;
 
   app.use(express.json());
+
   const openrouter = new OpenAI({
     apiKey: process.env.OPENROUTER_API_KEY || "",
     baseURL: "https://openrouter.ai/api/v1",
@@ -29,7 +32,7 @@ async function startServer() {
     const b = s.lastIndexOf("}");
     return a !== -1 && b !== -1 ? s.slice(a, b + 1) : '{"questions":[]}';
   }
-  
+
   const learnerAgent = new LearnerAgent();
   const strategyAgent = new StrategyAgent();
   const assessmentAgent = new AssessmentAgent();
@@ -38,7 +41,8 @@ async function startServer() {
 
   app.get("/api/students", async (req, res) => {
     try {
-      res.json(await learnerAgent.getAllStudents());
+      const students = await learnerAgent.getAllStudents();
+      res.json(students);
     } catch (error) {
       console.error("Error fetching students:", error);
       res.status(500).json({ error: "Internal Server Error" });
@@ -49,14 +53,19 @@ async function startServer() {
     try {
       const { topic, topics } = req.query;
       const profile = await learnerAgent.getProfile(req.params.name);
-      
+
       let filteredTopics = { ...profile.topics };
-      if (topic === 'Mixed' && typeof topics === 'string') {
-        const selectedTopics = topics.split(',');
+
+      if (topic === "Mixed" && typeof topics === "string") {
+        const selectedTopics = topics.split(",");
         filteredTopics = Object.fromEntries(
           Object.entries(profile.topics).filter(([t]) => selectedTopics.includes(t))
         );
-      } else if (topic && topic !== 'Overall' && topic !== 'Mixed') {
+      } else if (
+        typeof topic === "string" &&
+        topic !== "Overall" &&
+        topic !== "Mixed"
+      ) {
         filteredTopics = Object.fromEntries(
           Object.entries(profile.topics).filter(([t]) => t === topic)
         );
@@ -65,27 +74,43 @@ async function startServer() {
       const filteredProfile = { ...profile, topics: filteredTopics };
       const analytics = analyticsAgent.analyze(filteredProfile);
 
-      let weakestTopic = 'Coding';
-      let lowestMastery = 'Strong';
-      
+      let weakestTopic = "Coding";
+      let lowestMastery: MasteryLevel = "Strong";
+
       const topicEntries = Object.entries(profile.topics);
       if (topicEntries.length > 0) {
-        const masteryPriority = { 'Weak': 0, 'Moderate': 1, 'Strong': 2 };
-        topicEntries.forEach(([topic, data]) => {
-          if (masteryPriority[data.mastery] < masteryPriority[lowestMastery]) {
-            lowestMastery = data.mastery;
-            weakestTopic = topic;
+        const masteryPriority: Record<MasteryLevel, number> = {
+          Weak: 0,
+          Moderate: 1,
+          Strong: 2,
+        };
+
+        topicEntries.forEach(([topicName, data]) => {
+          if (masteryPriority[data.mastery as MasteryLevel] < masteryPriority[lowestMastery]) {
+            lowestMastery = data.mastery as MasteryLevel;
+            weakestTopic = topicName;
           }
         });
       }
-      
-      const recommendation = strategyAgent.recommend(weakestTopic, lowestMastery as any);
-      
-      res.json({ 
-        profile, 
-        analytics, 
+
+      const recommendation = strategyAgent.recommend(
+        weakestTopic,
+        profile.topics[weakestTopic] || {
+          mastery: lowestMastery,
+          attempts: 0,
+          scores: [],
+        }
+      );
+
+      res.json({
+        profile: filteredProfile,
+        analytics,
         recommendation,
-        logs: [...learnerAgent.getLogs(), ...analyticsAgent.getLogs(), ...strategyAgent.getLogs()] 
+        logs: [
+          ...learnerAgent.getLogs(),
+          ...analyticsAgent.getLogs(),
+          ...strategyAgent.getLogs(),
+        ],
       });
 
       learnerAgent.clearLogs();
@@ -100,12 +125,21 @@ async function startServer() {
   app.post("/api/quiz/prepare", async (req, res) => {
     try {
       const { name, topic, mastery } = req.body;
-      const recommendation = strategyAgent.recommend(topic, mastery);
-      
-      res.json({ 
-        recommendation, 
-        logs: [...strategyAgent.getLogs()] 
+
+      const profile = await learnerAgent.getProfile(name);
+      const topicData = profile.topics[topic] || {
+        mastery: mastery as MasteryLevel,
+        attempts: 0,
+        scores: [],
+      };
+
+      const recommendation = strategyAgent.recommend(topic, topicData);
+
+      res.json({
+        recommendation,
+        logs: [...strategyAgent.getLogs()],
       });
+
       strategyAgent.clearLogs();
     } catch (error) {
       console.error("Error preparing quiz:", error);
@@ -113,9 +147,34 @@ async function startServer() {
     }
   });
 
+  app.get("/api/quizzes/:name", async (req, res) => {
+    try {
+      const quizzes = await learnerAgent.getQuizzes(req.params.name);
+      res.json(quizzes);
+    } catch (error) {
+      console.error("Error fetching quizzes:", error);
+      res.status(500).json({ error: "Internal Server Error" });
+    }
+  });
+
+  app.get("/api/quiz/:name/:quizId", async (req, res) => {
+    try {
+      const quiz = await learnerAgent.getQuizById(req.params.name, req.params.quizId);
+
+      if (!quiz) {
+        return res.status(404).json({ error: "Quiz not found" });
+      }
+
+      res.json(quiz);
+    } catch (error) {
+      console.error("Error fetching quiz:", error);
+      res.status(500).json({ error: "Internal Server Error" });
+    }
+  });
+
   app.post("/api/quiz/submit", async (req, res) => {
     try {
-      const { name, topic, quiz, answers } = req.body;
+      const { name, topic, quiz, answers, difficulty } = req.body;
 
       const { score, conceptResults } = assessmentAgent.evaluate(quiz, answers);
 
@@ -123,7 +182,7 @@ async function startServer() {
         where: { name },
         update: {},
         create: { name },
-        select: { id: true }
+        select: { id: true },
       });
 
       const quizRow = await prisma.$transaction(async (tx) => {
@@ -131,11 +190,12 @@ async function startServer() {
           data: {
             studentId: student.id,
             topic,
-            difficulty: "unknown"
-          }
+            difficulty: difficulty || "Moderate",
+          },
         });
 
-        const createdQuestions = [];
+        const createdQuestions: { id: string }[] = [];
+
         for (let i = 0; i < quiz.questions.length; i++) {
           const q = quiz.questions[i];
           const createdQ = await tx.question.create({
@@ -144,24 +204,25 @@ async function startServer() {
               question: q.question,
               options: q.options,
               correctIndex: q.correctIndex,
-              explanation: (q as any).explanation ?? ""
+              explanation: q.explanation ?? "",
             },
-            select: { id: true }
+            select: { id: true },
           });
+
           createdQuestions.push(createdQ);
         }
 
         for (let i = 0; i < createdQuestions.length; i++) {
           const questionId = createdQuestions[i].id;
-          const selectedIndex = answers[i];
+          const selectedIndex = typeof answers[i] === "number" ? answers[i] : -1;
           const isCorrect = quiz.questions[i].correctIndex === selectedIndex;
 
           await tx.studentAnswer.create({
             data: {
               questionId,
               selectedIndex,
-              isCorrect
-            }
+              isCorrect,
+            },
           });
         }
 
@@ -169,12 +230,10 @@ async function startServer() {
       });
 
       const updatedTopic = await learnerAgent.updateScore(name, topic, score, conceptResults);
-
       const recommendation = strategyAgent.recommend(topic, updatedTopic);
-
       const profile = await learnerAgent.getProfile(name);
       const analytics = analyticsAgent.analyze(profile);
-      
+
       const mentorFeedback = await mentorAgent.generateFeedback(
         name,
         topic,
@@ -197,7 +256,7 @@ async function startServer() {
           ...learnerAgent.getLogs(),
           ...strategyAgent.getLogs(),
           ...analyticsAgent.getLogs(),
-          ...mentorAgent.getLogs()
+          ...mentorAgent.getLogs(),
         ],
       });
 
@@ -214,47 +273,62 @@ async function startServer() {
 
   app.post("/api/quiz/generate", async (req, res) => {
     try {
-      const { topic, mastery } = req.body;
+      const { topic, mastery, count = 5 } = req.body;
 
-      const difficultyMap = { Weak: "Easy", Moderate: "Medium", Strong: "Hard" };
+      const difficultyMap: Record<string, string> = {
+        Weak: "Easy",
+        Moderate: "Medium",
+        Strong: "Hard",
+      };
+
       const difficulty = difficultyMap[mastery] || "Easy";
 
-      const prompt = `Generate a 5-question multiple choice quiz about ${topic} at ${difficulty} difficulty.
+      const prompt = `
+Generate a ${count}-question multiple choice quiz about "${topic}" at ${difficulty} difficulty.
 
-      Rules:
-      - Each question must have exactly 4 options.
-      - Include the index of the correct option as correctIndex (0-3).
-      - Provide a short 1-line explanation for why the answer is correct.
-      - It must have a specific "concept" (sub-topic) within ${topic}.
-    
-    Example concepts for ${topic}:
-    - Math: Algebra, Fractions, Ratios, Percentages, Geometry
-    - Coding: Arrays, Loops, Functions, Recursion
-    - Aptitude: Logical reasoning, Pattern recognition, Data interpretation
-    - Mixed : Concepts can be mixed within the same topic like "Math" or "Coding"
+Rules:
+- Each question must have exactly 4 options.
+- Include the index of the correct option as correctIndex (0-3).
+- Provide a short 1-line explanation for why the answer is correct.
+- Each question must include a specific "concept" (sub-topic) within ${topic}.
 
-      Return ONLY valid JSON in this exact format:
+Example concepts for ${topic}:
+- Math: Algebra, Fractions, Ratios, Percentages, Geometry
+- Coding: Arrays, Loops, Functions, Recursion
+- Aptitude: Logical reasoning, Pattern recognition, Data interpretation
+- Mixed: Concepts can be mixed within the same quiz
 
-      {
-        "questions": [
-          {
-            "question": "...",
-            "options": ["A", "B", "C", "D"],
-            "correctIndex": 0,
-            "explanation": "...",
-            "concept": "..."
-          }
-        ]
-      }`;
+Return ONLY valid JSON in this exact format:
+{
+  "questions": [
+    {
+      "question": "...",
+      "options": ["A", "B", "C", "D"],
+      "correctIndex": 0,
+      "explanation": "...",
+      "concept": "..."
+    }
+  ]
+}
+`;
 
       const resp = await openrouter.chat.completions.create(
         {
-          model: "google/gemini-2.0-flash-001",
-          messages: [{ role: "user", content: prompt }],
+          model: process.env.OPENROUTER_MODEL || "google/gemini-2.0-flash-001",
+          messages: [
+            {
+              role: "system",
+              content: "You are a quiz generator that returns strict JSON only.",
+            },
+            {
+              role: "user",
+              content: prompt,
+            },
+          ],
         },
         {
           headers: {
-            "HTTP-Referer": "http://localhost:3000",
+            "HTTP-Referer": process.env.APP_URL || "http://localhost:3000",
             "X-Title": "Self-Evolving AI Mentor Ecosystem",
           },
         }

@@ -14,9 +14,29 @@ export interface TopicData {
   concepts?: Record<string, ConceptPerformance>;
 }
 
+export interface StudentAnswer {
+  quizId: string;
+  questionIndex: number;
+  selectedOption: number;
+  isCorrect: boolean;
+}
+
+export interface QuizHistoryItem {
+  id: string;
+  topic: string;
+  difficulty: string;
+  createdAt: string;
+  score: number;
+  correctAnswers: number;
+  totalQuestions: number;
+  quiz: Quiz;
+  answers: number[];
+}
+
 export interface StudentProfile {
   name: string;
   topics: Record<string, TopicData>;
+  quizzes?: QuizHistoryItem[];
 }
 
 export interface AgentLog {
