@@ -41,7 +41,7 @@ function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-const TOPICS = ['Math', 'Coding', 'Aptitude', 'Mixed'];
+const TOPICS = ['Math', 'Coding', 'Aptitude'];
 
 export default function App() {
   const [students, setStudents] = useState<string[]>([]);
@@ -54,6 +54,7 @@ export default function App() {
   const [step, setStep] = useState<'selection' | 'topic' | 'quiz' | 'result' | 'review'>('selection');
   
   const [currentTopic, setCurrentTopic] = useState('');
+  const [currentDifficulty, setCurrentDifficulty] = useState<string>('Moderate');
   const [currentQuiz, setCurrentQuiz] = useState<Quiz | null>(null);
   const [currentRecommendation, setCurrentRecommendation] = useState<Recommendation | null>(null);
   const [answers, setAnswers] = useState<number[]>([]);
@@ -153,9 +154,10 @@ export default function App() {
     setLoading(true);
     try {
       setCurrentTopic(topic);
+      const mastery = profile?.topics[topic]?.mastery || 'Weak';
+      setCurrentDifficulty(mastery);
       
       // 1. Generate quiz on frontend using Gemini
-      const mastery = profile?.topics[topic]?.mastery || 'Weak';
       const quiz = await generateQuizWithAI(topic, mastery);
       
       // 2. Get recommendation and logs from backend
@@ -206,6 +208,7 @@ export default function App() {
         body: JSON.stringify({ 
           name: selectedStudent, 
           topic: currentTopic, 
+          difficulty: currentDifficulty,
           quiz: currentQuiz, 
           answers 
         })
@@ -594,11 +597,11 @@ export default function App() {
                                 <td className="py-4 text-xs">
                                   <span className={cn(
                                     "px-2 py-0.5 rounded-full border",
-                                    quiz.difficulty === 'Weak' || quiz.difficulty === 'Beginner' ? "bg-blue-100 text-blue-700 border-blue-200" :
-                                    quiz.difficulty === 'Moderate' || quiz.difficulty === 'Intermediate' ? "bg-purple-100 text-purple-700 border-purple-200" :
+                                    (quiz.difficulty || 'Moderate') === 'Weak' || (quiz.difficulty || 'Moderate') === 'Beginner' ? "bg-blue-100 text-blue-700 border-blue-200" :
+                                    (quiz.difficulty || 'Moderate') === 'Moderate' || (quiz.difficulty || 'Moderate') === 'Intermediate' ? "bg-purple-100 text-purple-700 border-purple-200" :
                                     "bg-orange-100 text-orange-700 border-orange-200"
                                   )}>
-                                    {quiz.difficulty}
+                                    {quiz.difficulty || 'Moderate'}
                                   </span>
                                 </td>
                                 <td className="py-4 text-slate-500 text-sm">
@@ -1076,7 +1079,7 @@ export default function App() {
                       <div className="text-right">
                         <p className="text-xs uppercase tracking-widest text-slate-400 font-bold mb-1">Difficulty</p>
                         <span className="px-3 py-1 rounded-full bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 text-sm font-bold">
-                          {selectedQuizForReview.difficulty}
+                          {selectedQuizForReview.difficulty || 'Moderate'}
                         </span>
                       </div>
                     </div>
