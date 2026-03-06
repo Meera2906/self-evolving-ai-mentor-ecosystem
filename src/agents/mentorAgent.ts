@@ -40,8 +40,9 @@ export class MentorAgent {
   ): Promise<MentorFeedback> {
     this.log(`Generating feedback for ${name} on ${topic}`);
 
-    const correctCount = quiz.questions.filter((q, i) => q.correctIndex === answers[i]).length;
-    const incorrectCount = quiz.questions.length - correctCount;
+    const questions = quiz?.questions || [];
+    const correctCount = questions.filter((q, i) => q.correctIndex === answers[i]).length;
+    const incorrectCount = questions.length - correctCount;
 
     const weakConcepts = updatedTopic.concepts
       ? Object.values(updatedTopic.concepts)
@@ -65,18 +66,16 @@ Concept Performance Breakdown:
 ${JSON.stringify(updatedTopic.concepts || {})}
 
 Quiz Details:
-${quiz.questions
-  .map((q, i) => `Q: ${q.question} | Correct: ${q.correctIndex === answers[i]}`)
-  .join("\n")}
-
-Return ONLY valid JSON in exactly this format (no markdown, no extra text):
-{
-  "summary": "Short overall evaluation of the student's performance.",
-  "strengths": ["2–3 things the student did well"],
-  "weaknesses": ["2–3 areas where the student needs improvement"],
-  "nextSteps": ["3 actionable recommendations to improve learning"]
-}
-`;
+${questions.map((q, i) => `Q: ${q.question} | Correct: ${q.correctIndex === answers[i]}`).join('\n')}
+      
+      Please provide feedback in the following JSON format:
+      {
+        "summary": "Short overall evaluation of the student's performance.",
+        "strengths": ["2–3 things the student did well"],
+        "weaknesses": ["2–3 areas where the student needs improvement"],
+        "nextSteps": ["3 actionable recommendations to improve learning"]
+      }
+    `;
 
     try {
       const openrouter = new OpenAI({
