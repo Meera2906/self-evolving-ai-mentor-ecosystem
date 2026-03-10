@@ -40,8 +40,9 @@ export class MentorAgent {
   ): Promise<MentorFeedback> {
     this.log(`Generating feedback for ${name} on ${topic}`);
 
-    const correctCount = quiz.questions.filter((q, i) => q.correctIndex === answers[i]).length;
-    const incorrectCount = quiz.questions.length - correctCount;
+    const questions = quiz?.questions || [];
+    const correctCount = questions.filter((q, i) => q.correctIndex === answers[i]).length;
+    const incorrectCount = questions.length - correctCount;
 
     const weakConcepts = updatedTopic.concepts
       ? Object.values(updatedTopic.concepts)
@@ -65,7 +66,7 @@ Concept Performance Breakdown:
 ${JSON.stringify(updatedTopic.concepts || {})}
 
 Quiz Details:
-${quiz.questions
+${questions
   .map((q, i) => `Q: ${q.question} | Correct: ${q.correctIndex === answers[i]}`)
   .join("\n")}
 
@@ -86,7 +87,7 @@ Return ONLY valid JSON in exactly this format (no markdown, no extra text):
 
       const resp = await openrouter.chat.completions.create(
         {
-          model: "google/gemini-2.0-flash-001", // pick any OpenRouter model id you know works
+          model: process.env.OPENROUTER_MODEL || "google/gemini-2.0-flash-001",
           messages: [
             {
               role: "system",

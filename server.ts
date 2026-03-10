@@ -6,8 +6,6 @@ import express from "express";
 import { createServer as createViteServer } from "vite";
 import OpenAI from "openai";
 
-import { prisma } from "./src/db";
-
 import { LearnerAgent } from "./src/agents/learnerAgent";
 import { StrategyAgent } from "./src/agents/strategyAgent";
 import { AssessmentAgent } from "./src/agents/assessmentAgent";
@@ -38,6 +36,157 @@ async function startServer() {
   const assessmentAgent = new AssessmentAgent();
   const analyticsAgent = new AnalyticsAgent();
   const mentorAgent = new MentorAgent();
+
+  app.post("/api/onboarding", async (req, res) => {
+    try {
+      const { name, role, educationLevel, goals, targetTopics, selfRatedLevels } = req.body;
+
+      const profile = await learnerAgent.saveOnboarding(name, {
+        role,
+        educationLevel,
+        goals,
+        targetTopics,
+        selfRatedLevels,
+      });
+
+      res.json(profile);
+    } catch (error) {
+      console.error("Error saving onboarding:", error);
+      res.status(500).json({ error: "Internal Server Error" });
+    }
+  });
+
+  app.post("/api/diagnostic/submit", async (req, res) => {
+    try {
+      const { name, topic, quiz, answers, mentorFeedback } = req.body;
+
+      const diagnosticResults = assessmentAgent.evaluateDiagnostic(quiz, answers);
+
+      const conceptResults: Record<string, { correct: number; total: number }> = {};
+      Object.entries(diagnosticResults.conceptScores).forEach(([concept, score]) => {
+        conceptResults[concept] = {
+          correct: Math.round((score as number) / 10),
+          total: 10,
+        };
+      });
+
+      const updatedTopic = await learnerAgent.updateScore(
+        name,
+        topic,
+        diagnosticResults.score,
+        conceptResults
+      );
+
+      updatedTopic.mastery = diagnosticResults.estimatedLevel;
+
+      const learningPlan = strategyAgent.generateLearningPlan(topic, diagnosticResults);
+      await learnerAgent.saveLearningPlan(name, topic, learningPlan);
+
+      await learnerAgent.saveQuiz(name, topic, "Diagnostic", quiz, answers, diagnosticResults.score);
+
+      const profile = await learnerAgent.getProfile(name);
+      const analytics = analyticsAgent.analyze(profile);
+
+      res.json({
+        diagnosticResults,
+        learningPlan,
+        updatedTopic,
+        analytics,
+        mentorFeedback,
+      });
+    } catch (error) {
+      console.error("Error submitting diagnostic quiz:", error);
+      res.status(500).json({ error: "Internal Server Error" });
+    }
+  });
+
+  app.get("/api/learning-plan/:name/:topic", async (req, res) => {
+    try {
+      const { name, topic } = req.params;
+      const plan = await learnerAgent.getLearningPlan(name, topic);
+
+      if (!plan) {
+        return res.status(404).json({ error: "Learning plan not found" });
+      }
+
+      res.json(plan);
+    } catch (error) {
+      console.error("Error fetching learning plan:", error);
+      res.status(500).json({ error: "Internal Server Error" });
+    }
+  });
+
+  app.post("/api/diagnostic/generate", async (req, res) => {
+    try {
+      const { topic } = req.body;
+
+      const prompt = `
+  Generate a 10-question diagnostic quiz about "${topic}".
+
+  Rules:
+  - 3 easy questions
+  - 4 medium questions
+  - 3 slightly challenging questions
+  - Cover multiple concepts within ${topic}
+  - Each question must have exactly 4 options
+  - Include correctIndex (0-3)
+  - Provide a short 1-line explanation
+  - Each question must include a specific "concept"
+
+  Example concepts for ${topic}:
+  - Math: Fractions, Ratios, Percentages, Algebra basics, Word problems
+  - Coding: Arrays, Loops, Functions, Recursion, Object Oriented Programming
+  - Aptitude: Logical reasoning, Pattern recognition, Data interpretation, Quantitative aptitude
+
+  Return ONLY valid JSON in this exact format:
+  {
+    "questions": [
+      {
+        "question": "...",
+        "options": ["A", "B", "C", "D"],
+        "correctIndex": 0,
+        "explanation": "...",
+        "concept": "..."
+      }
+    ]
+  }
+  `;
+
+      const resp = await openrouter.chat.completions.create(
+        {
+          model: process.env.OPENROUTER_MODEL || "google/gemini-2.0-flash-001",
+          messages: [
+            {
+              role: "system",
+              content: "You are a quiz generator that returns strict JSON only.",
+            },
+            {
+              role: "user",
+              content: prompt,
+            },
+          ],
+        },
+        {
+          headers: {
+            "HTTP-Referer": process.env.APP_URL || "http://localhost:3000",
+            "X-Title": "Self-Evolving AI Mentor Ecosystem",
+          },
+        }
+      );
+
+      const text = resp.choices?.[0]?.message?.content ?? '{"questions":[]}';
+      const quiz = JSON.parse(extractJson(text));
+
+      if (!quiz.questions || !Array.isArray(quiz.questions)) {
+        return res.status(500).json({ error: "Invalid quiz format generated" });
+      }
+
+      res.json(quiz);
+    } catch (error: any) {
+      console.error("OpenRouter diagnostic error:", error);
+      res.status(500).json({ error: error?.message || "Failed to generate diagnostic quiz" });
+    }
+  });
 
   app.get("/api/students", async (req, res) => {
     try {
@@ -178,58 +327,17 @@ async function startServer() {
 
       const { score, conceptResults } = assessmentAgent.evaluate(quiz, answers);
 
-      const student = await prisma.student.upsert({
-        where: { name },
-        update: {},
-        create: { name },
-        select: { id: true },
-      });
-
-      const quizRow = await prisma.$transaction(async (tx) => {
-        const createdQuiz = await tx.quiz.create({
-          data: {
-            studentId: student.id,
-            topic,
-            difficulty: difficulty || "Moderate",
-          },
-        });
-
-        const createdQuestions: { id: string }[] = [];
-
-        for (let i = 0; i < quiz.questions.length; i++) {
-          const q = quiz.questions[i];
-          const createdQ = await tx.question.create({
-            data: {
-              quizId: createdQuiz.id,
-              question: q.question,
-              options: q.options,
-              correctIndex: q.correctIndex,
-              explanation: q.explanation ?? "",
-            },
-            select: { id: true },
-          });
-
-          createdQuestions.push(createdQ);
-        }
-
-        for (let i = 0; i < createdQuestions.length; i++) {
-          const questionId = createdQuestions[i].id;
-          const selectedIndex = typeof answers[i] === "number" ? answers[i] : -1;
-          const isCorrect = quiz.questions[i].correctIndex === selectedIndex;
-
-          await tx.studentAnswer.create({
-            data: {
-              questionId,
-              selectedIndex,
-              isCorrect,
-            },
-          });
-        }
-
-        return createdQuiz;
-      });
-
       const updatedTopic = await learnerAgent.updateScore(name, topic, score, conceptResults);
+
+      const savedQuiz = await learnerAgent.saveQuiz(
+        name,
+        topic,
+        difficulty || "Moderate",
+        quiz,
+        answers,
+        score
+      );
+
       const recommendation = strategyAgent.recommend(topic, updatedTopic);
       const profile = await learnerAgent.getProfile(name);
       const analytics = analyticsAgent.analyze(profile);
@@ -250,7 +358,7 @@ async function startServer() {
         recommendation,
         analytics,
         mentorFeedback,
-        quizId: quizRow.id,
+        quizId: savedQuiz.id,
         logs: [
           ...assessmentAgent.getLogs(),
           ...learnerAgent.getLogs(),

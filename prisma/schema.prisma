@@ -9,11 +9,14 @@ generator client {
 }
 
 model Student {
-  id       String          @id @default(uuid())
-  name     String          @unique
-  attempts Attempt[]
-  progress TopicProgress[]
-  quizzes  Quiz[]
+  id         String             @id @default(uuid())
+  name       String             @unique
+  attempts   Attempt[]
+  progress   TopicProgress[]
+  quizzes    Quiz[]
+  onboarding OnboardingProfile? @relation("StudentOnboarding")
+  plans      LearningPlan[]
+  concepts   ConceptProgress[]
 }
 
 model Attempt {
@@ -62,6 +65,7 @@ model Question {
   options      String[]
   correctIndex Int
   explanation  String
+  concept      String?
 
   quiz    Quiz            @relation(fields: [quizId], references: [id])
   answers StudentAnswer[]
@@ -74,4 +78,39 @@ model StudentAnswer {
   isCorrect     Boolean
 
   question Question @relation(fields: [questionId], references: [id])
+}
+
+model OnboardingProfile {
+  id        String @id @default(uuid())
+  studentId String @unique
+  data      Json
+
+  student Student @relation("StudentOnboarding", fields: [studentId], references: [id])
+}
+
+model LearningPlan {
+  id        String   @id @default(uuid())
+  studentId String
+  topic     String
+  data      Json
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  student Student @relation(fields: [studentId], references: [id])
+
+  @@unique([studentId, topic])
+}
+
+model ConceptProgress {
+  id        String @id @default(uuid())
+  studentId String
+  topic     String
+  concept   String
+  attempts  Int
+  correct   Int
+  accuracy  Float
+
+  student Student @relation(fields: [studentId], references: [id])
+
+  @@unique([studentId, topic, concept])
 }

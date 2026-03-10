@@ -34,8 +34,21 @@ import {
 import { motion, AnimatePresence } from 'motion/react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
-import { generateQuizWithAI } from './services/geminiService';
-import { StudentProfile, AnalyticsData, Quiz, Recommendation, MasteryLevel, MentorFeedback } from './types';
+import { generateQuizWithAI, generateDiagnosticQuiz } from './services/geminiService';
+import { MentorAgent } from './agents/mentorAgent';
+import { 
+  StudentProfile, 
+  AnalyticsData, 
+  Quiz, 
+  Recommendation, 
+  MasteryLevel, 
+  MentorFeedback,
+  OnboardingProfile,
+  LearningPlan,
+  UserRole,
+  EducationLevel,
+  Goal
+} from './types';
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -51,8 +64,18 @@ export default function App() {
   const [analytics, setAnalytics] = useState<AnalyticsData | null>(null);
   const [logs, setLogs] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
-  const [step, setStep] = useState<'selection' | 'topic' | 'quiz' | 'result' | 'review'>('selection');
+  const [step, setStep] = useState<'selection' | 'onboarding' | 'diagnostic' | 'topic' | 'quiz' | 'result' | 'review'>('selection');
   
+  const [onboardingForm, setOnboardingForm] = useState({
+    role: 'school_student' as UserRole,
+    educationLevel: 'school' as EducationLevel,
+    goals: [] as Goal[],
+    targetTopics: [] as string[],
+    selfRatedLevels: {} as Record<string, string>
+  });
+  const [diagnosticQuiz, setDiagnosticQuiz] = useState<Quiz | null>(null);
+  const [learningPlan, setLearningPlan] = useState<LearningPlan | null>(null);
+
   const [currentTopic, setCurrentTopic] = useState('');
   const [currentDifficulty, setCurrentDifficulty] = useState<string>('Moderate');
   const [currentQuiz, setCurrentQuiz] = useState<Quiz | null>(null);
@@ -80,9 +103,21 @@ export default function App() {
   }, [logs]);
 
   const fetchStudents = async () => {
-    const res = await fetch('/api/students');
-    const data = await res.json();
-    setStudents(data);
+    try {
+      const res = await fetch('/api/students');
+      const data = await res.json();
+
+      if (!res.ok) {
+        console.error('Failed to fetch students:', data);
+        setStudents([]);
+        return;
+      }
+
+      setStudents(Array.isArray(data) ? data : []);
+    } catch (error) {
+      console.error('Failed to fetch students:', error);
+      setStudents([]);
+    }
   };
 
   const addLog = (newLogs: string[]) => {
@@ -99,6 +134,9 @@ export default function App() {
     
     const res = await fetch(`/api/profile/${name}?topic=Overall`);
     const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data?.error || 'Failed to fetch profile');
+    }
     setProfile(data.profile);
     setAnalytics(data.analytics);
     if (data.recommendation) setCurrentRecommendation(data.recommendation);
@@ -112,8 +150,132 @@ export default function App() {
     }
 
     setShowReview(false);
-    setStep('topic');
+    
+    if (!data.profile.onboarding) {
+      setStep('onboarding');
+    } else {
+      setStep('topic');
+    }
     setLoading(false);
+  };
+
+  const handleOnboardingSubmit = async () => {
+    if (onboardingForm.targetTopics.length === 0) {
+      alert('Please select at least one target topic');
+      return;
+    }
+    setLoading(true);
+    try {
+      const res = await fetch('/api/onboarding', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: selectedStudent, ...onboardingForm })
+      });
+      const data = await res.json();
+      setProfile(data);
+      
+      // Start diagnostic for the first target topic
+      const firstTopic = onboardingForm.targetTopics[0];
+      setCurrentTopic(firstTopic);
+      
+      // Call Gemini directly from frontend
+      const quiz = await generateDiagnosticQuiz(firstTopic);
+      setDiagnosticQuiz(quiz);
+      
+      if (quiz && quiz.questions && quiz.questions.length > 0) {
+        setAnswers(new Array(quiz.questions.length).fill(-1));
+        setStep('diagnostic');
+      } else {
+        throw new Error('Failed to generate diagnostic quiz. Please try again.');
+      }
+    } catch (error: any) {
+      console.error('Onboarding failed:', error);
+      alert(`Onboarding failed: ${error.message || 'Unknown error'}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDiagnosticSubmit = async () => {
+    if (answers.includes(-1)) {
+      alert('Please answer all questions');
+      return;
+    }
+    setLoading(true);
+    try {
+      // 1. Generate Mentor Feedback on frontend
+      const mentorAgent = new MentorAgent();
+      
+      // We need temporary data for feedback generation
+      const questions = diagnosticQuiz?.questions || [];
+      const correctCount = questions.filter((q, i) => q.correctIndex === answers[i]).length;
+      const score = questions.length > 0 ? (correctCount / questions.length) * 100 : 0;
+      
+      // Mock updated topic for feedback (it will be properly updated in backend)
+      const mockUpdatedTopic = {
+        mastery: (score < 40 ? 'Weak' : score < 75 ? 'Moderate' : 'Strong') as MasteryLevel,
+        attempts: 1,
+        scores: [score],
+        concepts: {}
+      };
+
+      const mentorFeedback = await mentorAgent.generateFeedback(
+        selectedStudent!,
+        currentTopic,
+        score,
+        diagnosticQuiz!,
+        answers,
+        mockUpdatedTopic,
+        analytics || { 
+          overallScore: score, 
+          topicMastery: { [currentTopic]: mockUpdatedTopic.mastery },
+          conceptPerformance: [],
+          learningVelocity: 1,
+          consistencyScore: 100,
+          strengths: [],
+          weaknesses: []
+        }
+      );
+
+      const res = await fetch('/api/diagnostic/submit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          name: selectedStudent, 
+          topic: currentTopic, 
+          quiz: diagnosticQuiz, 
+          answers,
+          mentorFeedback
+        })
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        throw new Error(data?.error || 'Diagnostic submission failed');
+      }
+
+      setQuizResult({
+        score: data.diagnosticResults.score,
+        updatedTopic: data.updatedTopic,
+        mentorFeedback: data.mentorFeedback
+      });
+      
+      setLearningPlan(data.learningPlan);
+      if (data.logs) addLog(data.logs);
+      
+      // Refresh profile
+      const profileRes = await fetch(`/api/profile/${selectedStudent}?topic=Overall`);
+      const profileData = await profileRes.json();
+      setProfile(profileData.profile);
+      
+      setStep('result');
+    } catch (error: any) {
+      console.error('Diagnostic submission failed:', error);
+      alert(`Diagnostic submission failed: ${error.message}`);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleFilterChange = async (topic: string) => {
@@ -202,6 +364,37 @@ export default function App() {
     }
     setLoading(true);
     try {
+      // 1. Generate Mentor Feedback on frontend
+      const mentorAgent = new MentorAgent();
+      const questions = currentQuiz?.questions || [];
+      const correctCount = questions.filter((q, i) => q.correctIndex === answers[i]).length;
+      const score = questions.length > 0 ? (correctCount / questions.length) * 100 : 0;
+      
+      const currentTopicData = profile?.topics[currentTopic] || { mastery: 'Weak' as MasteryLevel, attempts: 0, scores: [] };
+      const mockUpdatedTopic = {
+        ...currentTopicData,
+        attempts: (currentTopicData.attempts || 0) + 1,
+        scores: [...(currentTopicData.scores || []), score],
+      };
+
+      const mentorFeedback = await mentorAgent.generateFeedback(
+        selectedStudent!,
+        currentTopic,
+        score,
+        currentQuiz!,
+        answers,
+        mockUpdatedTopic as any,
+        analytics || { 
+          overallScore: score, 
+          topicMastery: { [currentTopic]: mockUpdatedTopic.mastery as MasteryLevel },
+          conceptPerformance: [],
+          learningVelocity: 1,
+          consistencyScore: 100,
+          strengths: [],
+          weaknesses: []
+        }
+      );
+
       const res = await fetch('/api/quiz/submit', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -210,7 +403,8 @@ export default function App() {
           topic: currentTopic, 
           difficulty: currentDifficulty,
           quiz: currentQuiz, 
-          answers 
+          answers,
+          mentorFeedback
         })
       });
 
@@ -362,7 +556,7 @@ export default function App() {
                   </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    {students.map(name => (
+                    {Array.isArray(students) && students.map(name => (
                       <button
                         key={name}
                         onClick={() => handleSelectStudent(name)}
@@ -404,6 +598,170 @@ export default function App() {
                         className="p-2 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 transition-colors"
                       >
                         <PlusCircle className="w-5 h-5" />
+                      </button>
+                    </div>
+                  </div>
+                </motion.div>
+              )}
+
+              {step === 'onboarding' && (
+                <motion.div 
+                  key="onboarding"
+                  initial={{ opacity: 0, x: 20 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={{ opacity: 0, x: -20 }}
+                  className={cn(
+                    "rounded-3xl p-8 shadow-sm border space-y-8",
+                    darkMode ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"
+                  )}
+                >
+                  <div className="space-y-2">
+                    <h2 className="text-2xl font-bold">Personalize Your Journey</h2>
+                    <p className="text-slate-500">Tell us about yourself so we can tailor your learning experience.</p>
+                  </div>
+
+                  <div className="space-y-6">
+                    <div className="space-y-3">
+                      <label className="text-sm font-bold uppercase tracking-wider text-slate-500">I am a...</label>
+                      <div className="grid grid-cols-2 gap-3">
+                        {['school_student', 'college_student', 'professor', 'self_learner'].map(role => (
+                          <button
+                            key={role}
+                            onClick={() => setOnboardingForm(prev => ({ ...prev, role: role as UserRole }))}
+                            className={cn(
+                              "p-3 rounded-xl border text-sm transition-all",
+                              onboardingForm.role === role 
+                                ? "bg-indigo-600 border-indigo-600 text-white" 
+                                : "bg-transparent border-slate-200 dark:border-slate-800 hover:border-indigo-500"
+                            )}
+                          >
+                            {role.replace('_', ' ')}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="space-y-3">
+                      <label className="text-sm font-bold uppercase tracking-wider text-slate-500">Education Level</label>
+                      <div className="grid grid-cols-2 gap-3">
+                        {['school', 'undergraduate', 'postgraduate', 'professional'].map(level => (
+                          <button
+                            key={level}
+                            onClick={() => setOnboardingForm(prev => ({ ...prev, educationLevel: level as EducationLevel }))}
+                            className={cn(
+                              "p-3 rounded-xl border text-sm transition-all",
+                              onboardingForm.educationLevel === level 
+                                ? "bg-indigo-600 border-indigo-600 text-white" 
+                                : "bg-transparent border-slate-200 dark:border-slate-800 hover:border-indigo-500"
+                            )}
+                          >
+                            {level}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="space-y-3">
+                      <label className="text-sm font-bold uppercase tracking-wider text-slate-500">Target Topics</label>
+                      <div className="flex flex-wrap gap-3">
+                        {TOPICS.map(topic => (
+                          <button
+                            key={topic}
+                            onClick={() => {
+                              const newTopics = onboardingForm.targetTopics.includes(topic)
+                                ? onboardingForm.targetTopics.filter(t => t !== topic)
+                                : [...onboardingForm.targetTopics, topic];
+                              setOnboardingForm(prev => ({ ...prev, targetTopics: newTopics }));
+                            }}
+                            className={cn(
+                              "px-4 py-2 rounded-full border text-sm transition-all",
+                              onboardingForm.targetTopics.includes(topic)
+                                ? "bg-indigo-600 border-indigo-600 text-white" 
+                                : "bg-transparent border-slate-200 dark:border-slate-800 hover:border-indigo-500"
+                            )}
+                          >
+                            {topic}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="pt-6">
+                      <button
+                        onClick={handleOnboardingSubmit}
+                        disabled={loading}
+                        className="w-full bg-indigo-600 text-white py-4 rounded-2xl font-bold hover:bg-indigo-700 transition-all shadow-lg flex items-center justify-center gap-2"
+                      >
+                        {loading && <Loader2 className="w-5 h-5 animate-spin" />}
+                        Start Diagnostic Assessment
+                      </button>
+                    </div>
+                  </div>
+                </motion.div>
+              )}
+
+              {step === 'diagnostic' && diagnosticQuiz && (
+                <motion.div 
+                  key="diagnostic"
+                  initial={{ opacity: 0, scale: 0.95 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.95 }}
+                  className="space-y-6"
+                >
+                  <div className={cn(
+                    "border rounded-2xl p-6 flex gap-4",
+                    darkMode ? "bg-amber-900/20 border-amber-800/50" : "bg-amber-50 border-amber-100"
+                  )}>
+                    <Sparkles className="w-6 h-6 text-amber-500 shrink-0" />
+                    <div>
+                      <h3 className="font-bold text-amber-800 dark:text-amber-300">Diagnostic Assessment: {currentTopic}</h3>
+                      <p className="text-sm text-amber-700 dark:text-amber-400">This quiz helps us understand your current level. Don't worry if you don't know all the answers!</p>
+                    </div>
+                  </div>
+
+                  <div className={cn(
+                    "rounded-3xl p-8 shadow-sm border space-y-8",
+                    darkMode ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"
+                  )}>
+                    <div className="space-y-10">
+                      {diagnosticQuiz.questions.map((q, qIdx) => (
+                        <div key={qIdx} className="space-y-4">
+                          <p className="font-medium text-lg flex gap-3">
+                            <span className="text-indigo-500 font-bold">{qIdx + 1}.</span>
+                            {q.question}
+                          </p>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pl-8">
+                            {q.options.map((opt, oIdx) => (
+                              <button
+                                key={oIdx}
+                                onClick={() => {
+                                  const newAns = [...answers];
+                                  newAns[qIdx] = oIdx;
+                                  setAnswers(newAns);
+                                }}
+                                className={cn(
+                                  "p-4 rounded-xl border text-left transition-all text-sm",
+                                  answers[qIdx] === oIdx 
+                                    ? "border-indigo-600 bg-indigo-50 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-300"
+                                    : "border-slate-200 dark:border-slate-800 hover:border-slate-300"
+                                )}
+                              >
+                                {opt}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="pt-8 flex justify-end">
+                      <button
+                        onClick={handleDiagnosticSubmit}
+                        disabled={loading}
+                        className="bg-indigo-600 text-white px-8 py-3 rounded-2xl font-bold hover:bg-indigo-700 transition-all shadow-lg disabled:opacity-50 flex items-center gap-2"
+                      >
+                        {loading && <Loader2 className="w-5 h-5 animate-spin" />}
+                        Complete Diagnostic
                       </button>
                     </div>
                   </div>
@@ -756,6 +1114,63 @@ export default function App() {
                         </div>
                       </div>
                     </div>
+
+                    {/* Learning Plan Card */}
+                    {learningPlan && (
+                      <div className={cn(
+                        "rounded-3xl p-8 shadow-sm border text-left space-y-6 mb-8",
+                        darkMode ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"
+                      )}>
+                        <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400 rounded-full flex items-center justify-center">
+                            <TrendingUp className="w-5 h-5" />
+                          </div>
+                          <h3 className="text-xl font-bold">Personalized Learning Plan</h3>
+                        </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                          <div className="space-y-4">
+                            <div className="flex items-center justify-between">
+                              <span className="text-sm text-slate-500">Current Level</span>
+                              <MasteryBadge level={learningPlan.currentLevel as MasteryLevel} />
+                            </div>
+                            <div className="flex items-center justify-between">
+                              <span className="text-sm text-slate-500">Target Level</span>
+                              <MasteryBadge level={learningPlan.targetLevel as MasteryLevel} />
+                            </div>
+                            <div className="pt-2">
+                              <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Weak Concepts</p>
+                              <div className="flex flex-wrap gap-2">
+                                {learningPlan.weakConcepts.map(c => (
+                                  <span key={c} className="px-2 py-1 bg-rose-100 text-rose-700 rounded-lg text-[10px] font-bold uppercase">{c}</span>
+                                ))}
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="space-y-4">
+                            <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">Next Steps</p>
+                            <div className="space-y-3">
+                              {learningPlan.steps.map((step, i) => (
+                                <div key={i} className="flex items-center gap-3 p-3 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-700">
+                                  <div className={cn(
+                                    "w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold",
+                                    step.type === 'lesson' ? "bg-blue-100 text-blue-600" :
+                                    step.type === 'practice' ? "bg-green-100 text-green-600" : "bg-purple-100 text-purple-600"
+                                  )}>
+                                    {i + 1}
+                                  </div>
+                                  <div>
+                                    <p className="text-xs font-bold capitalize">{step.type}</p>
+                                    <p className="text-[10px] text-slate-500">{step.concept}</p>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
 
                     {/* AI Mentor Feedback Card */}
                     {quizResult.mentorFeedback && (
