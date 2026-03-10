@@ -1,4 +1,4 @@
-import { MasteryLevel, Recommendation, Video, LearningPlan, LearningPlanStep } from '../types';
+import { MasteryLevel, Recommendation, Video } from '../types';
 
 export class StrategyAgent {
   private logs: string[] = [];
@@ -124,41 +124,5 @@ export class StrategyAgent {
     this.log(`Recommended Mode: ${mode}`);
     
     return { mode, explanation, recommendedVideos: recommendedVideos.slice(0, 5) };
-  }
-  
-  generateLearningPlan(topic: string, diagnosticResults: { 
-    estimatedLevel: MasteryLevel; 
-    conceptScores: Record<string, number>;
-  }): LearningPlan {
-    this.log(`Generating Learning Plan for ${topic}`);
-    const { estimatedLevel, conceptScores } = diagnosticResults;
-    
-    const weakConcepts = Object.entries(conceptScores)
-      .filter(([_, score]) => score < 60)
-      .map(([concept]) => concept);
-
-    const targetLevel: MasteryLevel = estimatedLevel === 'Strong' ? 'Strong' : (estimatedLevel === 'Moderate' ? 'Strong' : 'Moderate');
-
-    const steps: LearningPlanStep[] = [];
-    
-    // Add steps for weak concepts
-    weakConcepts.forEach(concept => {
-      steps.push({ type: 'lesson', concept });
-      steps.push({ type: 'practice', concept });
-    });
-
-    // Add a checkpoint
-    steps.push({ type: 'checkpoint_quiz', concept: `${topic} Basics`, topic });
-
-    const plan: LearningPlan = {
-      topic,
-      currentLevel: estimatedLevel,
-      targetLevel,
-      weakConcepts,
-      steps
-    };
-
-    this.log(`Learning Plan generated with ${steps.length} steps`);
-    return plan;
   }
 }

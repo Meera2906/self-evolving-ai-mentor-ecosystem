@@ -1,6 +1,7 @@
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DATABASE_URL_UNPOOLED")
 }
 
 generator client {
@@ -8,15 +9,11 @@ generator client {
 }
 
 model Student {
-  id                String            @id @default(uuid())
-  name              String            @unique
-  onboardingProfile Json?
-
-  attempts          Attempt[]
-  progress          TopicProgress[]
-  quizzes           Quiz[]
-  learningPlans     LearningPlan[]
-  conceptProgress   ConceptProgress[]
+  id       String          @id @default(uuid())
+  name     String          @unique
+  attempts Attempt[]
+  progress TopicProgress[]
+  quizzes  Quiz[]
 }
 
 model Attempt {
@@ -45,62 +42,33 @@ model TopicProgress {
   @@unique([studentId, topic])
 }
 
-model ConceptProgress {
-  id        String   @id @default(uuid())
-  studentId String
-  topic     String
-  concept   String
-  attempts  Int
-  correct   Int
-  accuracy  Int
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  student Student @relation(fields: [studentId], references: [id])
-
-  @@unique([studentId, topic, concept])
-}
-
-model LearningPlan {
-  id        String   @id @default(uuid())
-  studentId String
-  topic     String
-  planJson  Json
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  student Student @relation(fields: [studentId], references: [id])
-
-  @@unique([studentId, topic])
-}
-
 model Quiz {
-  id         String     @id @default(uuid())
+  id         String   @id @default(uuid())
   studentId  String
   topic      String
   difficulty String
-  createdAt  DateTime   @default(now())
+  createdAt  DateTime @default(now())
 
   student   Student    @relation(fields: [studentId], references: [id])
   questions Question[]
-  
+
+  @@index([studentId, topic])
 }
 
 model Question {
-  id           String          @id @default(uuid())
-  quizId        String
-  question      String
-  options       String[]
-  correctIndex  Int
-  explanation   String
-  concept       String?
+  id           String   @id @default(uuid())
+  quizId       String
+  question     String
+  options      String[]
+  correctIndex Int
+  explanation  String
 
-  quiz     Quiz            @relation(fields: [quizId], references: [id])
-  answers  StudentAnswer[]
+  quiz    Quiz            @relation(fields: [quizId], references: [id])
+  answers StudentAnswer[]
 }
 
 model StudentAnswer {
-  id            String   @id @default(uuid())
+  id            String  @id @default(uuid())
   questionId    String
   selectedIndex Int
   isCorrect     Boolean

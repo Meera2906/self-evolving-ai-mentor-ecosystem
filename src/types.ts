@@ -33,36 +33,8 @@ export interface QuizHistoryItem {
   answers: number[];
 }
 
-export type UserRole = 'school_student' | 'college_student' | 'professor' | 'self_learner';
-export type EducationLevel = 'school' | 'undergraduate' | 'postgraduate' | 'professional';
-export type Goal = 'placements' | 'exam preparation' | 'concept learning' | 'teaching support';
-
-export interface OnboardingProfile {
-  role: UserRole;
-  educationLevel: EducationLevel;
-  goals: Goal[];
-  targetTopics: string[];
-  selfRatedLevels: Record<string, string>;
-}
-
-export interface LearningPlanStep {
-  type: 'lesson' | 'practice' | 'checkpoint_quiz';
-  concept: string;
-  topic?: string;
-}
-
-export interface LearningPlan {
-  topic: string;
-  currentLevel: string;
-  targetLevel: string;
-  weakConcepts: string[];
-  steps: LearningPlanStep[];
-}
-
 export interface StudentProfile {
   name: string;
-  onboarding?: OnboardingProfile;
-  learningPlans?: Record<string, LearningPlan>;
   topics: Record<string, TopicData>;
   quizzes?: QuizHistoryItem[];
 }
@@ -78,7 +50,7 @@ export interface QuizQuestion {
   options: string[];
   correctIndex: number;
   explanation: string;
-  concept?: string;
+  concept: string;
 }
 
 export interface Quiz {

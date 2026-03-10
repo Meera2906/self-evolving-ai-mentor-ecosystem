@@ -33,41 +33,13 @@ async function startServer() {
     return a !== -1 && b !== -1 ? s.slice(a, b + 1) : '{"questions":[]}';
   }
 
-  async function generateQuizFromOpenRouter(prompt: string) {
-    const resp = await openrouter.chat.completions.create(
-      {
-        model: process.env.OPENROUTER_MODEL || "google/gemini-2.0-flash-001",
-        messages: [
-          {
-            role: "system",
-            content:
-              "You are a quiz generator that returns strict JSON only. Do not include markdown fences or extra text.",
-          },
-          {
-            role: "user",
-            content: prompt,
-          },
-        ],
-      },
-      {
-        headers: {
-          "HTTP-Referer": process.env.APP_URL || "http://localhost:3000",
-          "X-Title": "Self-Evolving AI Mentor Ecosystem",
-        },
-      }
-    );
-
-    const text = resp.choices?.[0]?.message?.content ?? '{"questions":[]}';
-    return JSON.parse(extractJson(text));
-  }
-
   const learnerAgent = new LearnerAgent();
   const strategyAgent = new StrategyAgent();
   const assessmentAgent = new AssessmentAgent();
   const analyticsAgent = new AnalyticsAgent();
   const mentorAgent = new MentorAgent();
 
-  app.get("/api/students", async (_req, res) => {
+  app.get("/api/students", async (req, res) => {
     try {
       const students = await learnerAgent.getAllStudents();
       res.json(students);
@@ -87,9 +59,7 @@ async function startServer() {
       if (topic === "Mixed" && typeof topics === "string") {
         const selectedTopics = topics.split(",");
         filteredTopics = Object.fromEntries(
-          Object.entries(profile.topics).filter(([t]) =>
-            selectedTopics.includes(t)
-          )
+          Object.entries(profile.topics).filter(([t]) => selectedTopics.includes(t))
         );
       } else if (
         typeof topic === "string" &&
@@ -116,10 +86,7 @@ async function startServer() {
         };
 
         topicEntries.forEach(([topicName, data]) => {
-          if (
-            masteryPriority[data.mastery as MasteryLevel] <
-            masteryPriority[lowestMastery]
-          ) {
+          if (masteryPriority[data.mastery as MasteryLevel] < masteryPriority[lowestMastery]) {
             lowestMastery = data.mastery as MasteryLevel;
             weakestTopic = topicName;
           }
@@ -152,72 +119,6 @@ async function startServer() {
     } catch (error) {
       console.error("Error fetching profile:", error);
       res.status(500).json({ error: "Internal Server Error" });
-    }
-  });
-
-  app.post("/api/onboarding", async (req, res) => {
-    try {
-      const { name, onboarding } = req.body;
-
-      if (!name || !onboarding) {
-        return res
-          .status(400)
-          .json({ error: "Missing name or onboarding data" });
-      }
-
-      const result = await learnerAgent.saveOnboarding(name, onboarding);
-
-      res.json({
-        success: true,
-        profile: result,
-      });
-    } catch (error: any) {
-      console.error("Error saving onboarding:", error);
-      res.status(500).json({
-        error: error?.message || "Failed to save onboarding",
-      });
-    }
-  });
-
-  app.post("/api/learning-plan", async (req, res) => {
-    try {
-      const { name, topic, plan } = req.body;
-
-      if (!name || !topic || !plan) {
-        return res
-          .status(400)
-          .json({ error: "Missing name, topic, or plan" });
-      }
-
-      const savedPlan = await learnerAgent.saveLearningPlan(name, topic, plan);
-
-      res.json({
-        success: true,
-        plan: savedPlan,
-      });
-    } catch (error: any) {
-      console.error("Error saving learning plan:", error);
-      res.status(500).json({
-        error: error?.message || "Failed to save learning plan",
-      });
-    }
-  });
-
-  app.get("/api/learning-plan/:name/:topic", async (req, res) => {
-    try {
-      const { name, topic } = req.params;
-      const plan = await learnerAgent.getLearningPlan(name, topic);
-
-      if (!plan) {
-        return res.status(404).json({ error: "Learning plan not found" });
-      }
-
-      res.json(plan);
-    } catch (error: any) {
-      console.error("Error fetching learning plan:", error);
-      res.status(500).json({
-        error: error?.message || "Failed to fetch learning plan",
-      });
     }
   });
 
@@ -258,10 +159,7 @@ async function startServer() {
 
   app.get("/api/quiz/:name/:quizId", async (req, res) => {
     try {
-      const quiz = await learnerAgent.getQuizById(
-        req.params.name,
-        req.params.quizId
-      );
+      const quiz = await learnerAgent.getQuizById(req.params.name, req.params.quizId);
 
       if (!quiz) {
         return res.status(404).json({ error: "Quiz not found" });
@@ -307,7 +205,6 @@ async function startServer() {
               options: q.options,
               correctIndex: q.correctIndex,
               explanation: q.explanation ?? "",
-              concept: q.concept ?? null,
             },
             select: { id: true },
           });
@@ -332,12 +229,7 @@ async function startServer() {
         return createdQuiz;
       });
 
-      const updatedTopic = await learnerAgent.updateScore(
-        name,
-        topic,
-        score,
-        conceptResults
-      );
+      const updatedTopic = await learnerAgent.updateScore(name, topic, score, conceptResults);
       const recommendation = strategyAgent.recommend(topic, updatedTopic);
       const profile = await learnerAgent.getProfile(name);
       const analytics = analyticsAgent.analyze(profile);
@@ -399,8 +291,6 @@ Rules:
 - Include the index of the correct option as correctIndex (0-3).
 - Provide a short 1-line explanation for why the answer is correct.
 - Each question must include a specific "concept" (sub-topic) within ${topic}.
-- Keep the quiz balanced and relevant to the topic.
-- Return ONLY valid JSON.
 
 Example concepts for ${topic}:
 - Math: Algebra, Fractions, Ratios, Percentages, Geometry
@@ -408,7 +298,7 @@ Example concepts for ${topic}:
 - Aptitude: Logical reasoning, Pattern recognition, Data interpretation
 - Mixed: Concepts can be mixed within the same quiz
 
-Return JSON in this exact format:
+Return ONLY valid JSON in this exact format:
 {
   "questions": [
     {
@@ -422,69 +312,35 @@ Return JSON in this exact format:
 }
 `;
 
-      const quiz = await generateQuizFromOpenRouter(prompt);
-      res.json(quiz);
-    } catch (error: any) {
-      console.error("OpenRouter error in /api/quiz/generate:", error);
-      res.status(500).json({
-        error: error?.message || "Failed to generate quiz",
-      });
-    }
-  });
+      const resp = await openrouter.chat.completions.create(
+        {
+          model: process.env.OPENROUTER_MODEL || "google/gemini-2.0-flash-001",
+          messages: [
+            {
+              role: "system",
+              content: "You are a quiz generator that returns strict JSON only.",
+            },
+            {
+              role: "user",
+              content: prompt,
+            },
+          ],
+        },
+        {
+          headers: {
+            "HTTP-Referer": process.env.APP_URL || "http://localhost:3000",
+            "X-Title": "Self-Evolving AI Mentor Ecosystem",
+          },
+        }
+      );
 
-  app.post("/api/quiz/diagnostic", async (req, res) => {
-    try {
-      const { topic } = req.body;
-
-      const prompt = `
-Generate a 10-question diagnostic quiz about "${topic}".
-
-The quiz must include:
-- 3 easy questions
-- 4 medium questions
-- 3 slightly challenging questions
-- coverage across multiple concepts within ${topic}
-
-Rules:
-- Each question must have exactly 4 options.
-- Include correctIndex from 0 to 3.
-- Provide a short 1-line explanation.
-- Each question must include a specific "concept".
-- Return ONLY valid JSON.
-
-Example concepts for ${topic}:
-- Math: Fractions, Ratios, Percentages, Algebra basics, Word problems
-- Coding: Arrays, Loops, Functions, Recursion, Object Oriented Programming
-- Aptitude: Logical reasoning, Pattern recognition, Data interpretation, Quantitative aptitude
-
-Return JSON in this exact format:
-{
-  "questions": [
-    {
-      "question": "...",
-      "options": ["A", "B", "C", "D"],
-      "correctIndex": 0,
-      "explanation": "...",
-      "concept": "..."
-    }
-  ]
-}
-`;
-
-      const quiz = await generateQuizFromOpenRouter(prompt);
-
-      if (!quiz.questions || !Array.isArray(quiz.questions)) {
-        return res.status(500).json({
-          error: "Invalid diagnostic quiz format returned by model",
-        });
-      }
+      const text = resp.choices?.[0]?.message?.content ?? '{"questions":[]}';
+      const quiz = JSON.parse(extractJson(text));
 
       res.json(quiz);
     } catch (error: any) {
-      console.error("OpenRouter error in /api/quiz/diagnostic:", error);
-      res.status(500).json({
-        error: error?.message || "Failed to generate diagnostic quiz",
-      });
+      console.error("OpenRouter error:", error);
+      res.status(500).json({ error: error?.message || "Failed to generate quiz" });
     }
   });
 

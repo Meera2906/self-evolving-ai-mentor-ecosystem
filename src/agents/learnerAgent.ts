@@ -1,11 +1,5 @@
 import { prisma } from "../db";
-import {
-  StudentProfile,
-  MasteryLevel,
-  TopicData,
-  OnboardingProfile,
-  LearningPlan,
-} from "../types";
+import { StudentProfile, MasteryLevel, TopicData } from "../types";
 
 export class LearnerAgent {
   private logs: string[] = [];
@@ -29,134 +23,35 @@ export class LearnerAgent {
       where: { name },
       update: {},
       create: { name },
-      include: {
-        progress: {
-          orderBy: { updatedAt: "desc" },
-        },
-        learningPlans: true,
-        quizzes: {
-          include: {
-            questions: {
-              include: {
-                answers: true,
-              },
-            },
-          },
-          orderBy: { createdAt: "desc" },
-        },
-      },
+      select: { id: true, name: true },
+    });
+
+    const progressRows = await prisma.topicProgress.findMany({
+      where: { studentId: student.id },
+      select: { topic: true, mastery: true, attempts: true, avgScore: true },
+      orderBy: { updatedAt: "desc" },
     });
 
     const topics: Record<string, TopicData> = {};
-
-    for (const p of student.progress) {
+    for (const p of progressRows) {
       const attempts = await prisma.attempt.findMany({
-        where: {
-          studentId: student.id,
-          topic: p.topic,
-        },
+        where: { studentId: student.id, topic: p.topic },
         select: { score: true },
         orderBy: { createdAt: "asc" },
-      });
-
-      const conceptRows = await prisma.conceptProgress.findMany({
-        where: {
-          studentId: student.id,
-          topic: p.topic,
-        },
-        orderBy: { concept: "asc" },
       });
 
       topics[p.topic] = {
         scores: attempts.map((a) => a.score),
         mastery: p.mastery as MasteryLevel,
         attempts: p.attempts,
-        concepts: Object.fromEntries(
-          conceptRows.map((c) => [
-            c.concept,
-            {
-              concept: c.concept,
-              attempts: c.attempts,
-              correct: c.correct,
-              accuracy: c.accuracy,
-            },
-          ])
-        ),
-      };
-    }
-
-    const quizzes = student.quizzes.map((q) => {
-      const correctAnswers = q.questions.reduce((count, question) => {
-        const answer = question.answers[0];
-        return count + (answer?.isCorrect ? 1 : 0);
-      }, 0);
-
-      const totalQuestions = q.questions.length;
-      const score =
-        totalQuestions > 0
-          ? Math.round((correctAnswers / totalQuestions) * 100)
-          : 0;
-
-      return {
-        id: q.id,
-        topic: q.topic,
-        difficulty: q.difficulty,
-        createdAt: q.createdAt.toISOString(),
-        score,
-        correctAnswers,
-        totalQuestions,
-        quiz: {
-          questions: q.questions.map((question) => ({
-            question: question.question,
-            options: question.options,
-            correctIndex: question.correctIndex,
-            explanation: question.explanation,
-            concept: question.concept ?? undefined,
-          })),
-        },
-        answers: q.questions.map(
-          (question) => question.answers[0]?.selectedIndex ?? -1
-        ),
-      };
-    });
-
-    const learningPlans: Record<string, LearningPlan> = {};
-    for (const lp of student.learningPlans) {
-      learningPlans[lp.topic] = lp.planJson as unknown as LearningPlan;
+      } as TopicData;
     }
 
     this.log(`Student Profile Loaded: ${student.name}`);
-
-    return {
-      name: student.name,
-      topics,
-      quizzes,
-      onboarding: student.onboardingProfile as unknown as OnboardingProfile | undefined,
-      learningPlans,
-    };
+    return { name: student.name, topics };
   }
 
-  async saveOnboarding(name: string, onboarding: OnboardingProfile) {
-    const student = await prisma.student.upsert({
-      where: { name },
-      update: {
-        onboardingProfile: onboarding as any,
-      },
-      create: {
-        name,
-        onboardingProfile: onboarding as any,
-      },
-      select: { id: true, name: true, onboardingProfile: true },
-    });
-
-    this.log(`Onboarding Profile Saved for ${name}`);
-    return {
-      name: student.name,
-      onboarding: student.onboardingProfile as unknown as OnboardingProfile,
-    };
-  }
-
-  async saveLearningPlan(name: string, topic: string, plan: LearningPlan) {
+  async saveQuiz(name: string, topic: string, difficulty: string, quiz: any, answers: number[], score: number) {
     const student = await prisma.student.upsert({
       where: { name },
       update: {},
@@ -164,67 +59,7 @@ export class LearnerAgent {
       select: { id: true },
     });
 
-    await prisma.learningPlan.upsert({
-      where: {
-        studentId_topic: {
-          studentId: student.id,
-          topic,
-        },
-      },
-      update: {
-        planJson: plan as any,
-      },
-      create: {
-        studentId: student.id,
-        topic,
-        planJson: plan as any,
-      },
-    });
-
-    this.log(`Learning Plan Saved for ${name} - Topic: ${topic}`);
-    return plan;
-  }
-
-  async getLearningPlan(name: string, topic: string) {
-    const student = await prisma.student.findUnique({
-      where: { name },
-      select: { id: true },
-    });
-
-    if (!student) return undefined;
-
-    const plan = await prisma.learningPlan.findUnique({
-      where: {
-        studentId_topic: {
-          studentId: student.id,
-          topic,
-        },
-      },
-    });
-
-    if (!plan) return undefined;
-
-    return plan.planJson as unknown as LearningPlan;
-  }
-
-  async saveQuiz(
-    name: string,
-    topic: string,
-    difficulty: string,
-    quiz: any,
-    answers: number[],
-    score: number
-  ) {
-    const student = await prisma.student.upsert({
-      where: { name },
-      update: {},
-      create: { name },
-      select: { id: true },
-    });
-
-    const correctAnswers = quiz.questions.filter(
-      (q: any, i: number) => q.correctIndex === answers[i]
-    ).length;
+    const correctAnswers = quiz.questions.filter((q: any, i: number) => q.correctIndex === answers[i]).length;
 
     const createdQuiz = await prisma.$transaction(async (tx) => {
       const quizRow = await tx.quiz.create({
@@ -245,7 +80,6 @@ export class LearnerAgent {
             options: q.options,
             correctIndex: q.correctIndex,
             explanation: q.explanation ?? "",
-            concept: q.concept ?? null,
           },
           select: { id: true },
         });
@@ -308,10 +142,7 @@ export class LearnerAgent {
       }, 0);
 
       const totalQuestions = q.questions.length;
-      const score =
-        totalQuestions > 0
-          ? Math.round((correctAnswers / totalQuestions) * 100)
-          : 0;
+      const score = totalQuestions > 0 ? Math.round((correctAnswers / totalQuestions) * 100) : 0;
 
       return {
         id: q.id,
@@ -321,18 +152,6 @@ export class LearnerAgent {
         score,
         correctAnswers,
         totalQuestions,
-        quiz: {
-          questions: q.questions.map((question) => ({
-            question: question.question,
-            options: question.options,
-            correctIndex: question.correctIndex,
-            explanation: question.explanation,
-            concept: question.concept ?? undefined,
-          })),
-        },
-        answers: q.questions.map(
-          (question) => question.answers[0]?.selectedIndex ?? -1
-        ),
       };
     });
   }
@@ -366,12 +185,9 @@ export class LearnerAgent {
       options: question.options,
       correctIndex: question.correctIndex,
       explanation: question.explanation,
-      concept: question.concept ?? undefined,
     }));
 
-    const answers = quizRow.questions.map(
-      (question) => question.answers[0]?.selectedIndex ?? -1
-    );
+    const answers = quizRow.questions.map((question) => question.answers[0]?.selectedIndex ?? -1);
 
     const correctAnswers = quizRow.questions.reduce((count, question) => {
       const answer = question.answers[0];
@@ -379,10 +195,7 @@ export class LearnerAgent {
     }, 0);
 
     const totalQuestions = quizRow.questions.length;
-    const score =
-      totalQuestions > 0
-        ? Math.round((correctAnswers / totalQuestions) * 100)
-        : 0;
+    const score = totalQuestions > 0 ? Math.round((correctAnswers / totalQuestions) * 100) : 0;
 
     return {
       id: quizRow.id,
@@ -418,48 +231,6 @@ export class LearnerAgent {
       },
     });
 
-    if (conceptResults) {
-      for (const [concept, result] of Object.entries(conceptResults)) {
-        const existing = await prisma.conceptProgress.findUnique({
-          where: {
-            studentId_topic_concept: {
-              studentId: student.id,
-              topic,
-              concept,
-            },
-          },
-        });
-
-        const attempts = (existing?.attempts ?? 0) + result.total;
-        const correct = (existing?.correct ?? 0) + result.correct;
-        const accuracy =
-          attempts > 0 ? Math.round((correct / attempts) * 100) : 0;
-
-        await prisma.conceptProgress.upsert({
-          where: {
-            studentId_topic_concept: {
-              studentId: student.id,
-              topic,
-              concept,
-            },
-          },
-          update: {
-            attempts,
-            correct,
-            accuracy,
-          },
-          create: {
-            studentId: student.id,
-            topic,
-            concept,
-            attempts,
-            correct,
-            accuracy,
-          },
-        });
-      }
-    }
-
     const agg = await prisma.attempt.aggregate({
       where: { studentId: student.id, topic },
       _avg: { score: true },
@@ -474,23 +245,18 @@ export class LearnerAgent {
     else if (avgScore >= 60) newMastery = "Moderate";
 
     await prisma.topicProgress.upsert({
-      where: {
-        studentId_topic: {
-          studentId: student.id,
-          topic,
-        },
-      },
+      where: { studentId_topic: { studentId: student.id, topic } },
       update: {
         mastery: newMastery,
         attempts: attemptsCount,
-        avgScore,
+        avgScore: avgScore,
       },
       create: {
         studentId: student.id,
         topic,
         mastery: newMastery,
         attempts: attemptsCount,
-        avgScore,
+        avgScore: avgScore,
       },
     });
 
@@ -500,35 +266,17 @@ export class LearnerAgent {
       orderBy: { createdAt: "asc" },
     });
 
-    const conceptRows = await prisma.conceptProgress.findMany({
-      where: { studentId: student.id, topic },
-      orderBy: { concept: "asc" },
-    });
-
     this.log(`Student: ${student.name}`);
     this.log(`Topic: ${topic}`);
     this.log(`Score: ${score}`);
     this.log(`Mastery Updated: ${newMastery}`);
-    if (conceptResults) {
-      this.log(`Concepts Updated: ${Object.keys(conceptResults).join(", ")}`);
-    }
+    if (conceptResults) this.log(`Concepts Updated: ${Object.keys(conceptResults).join(", ")}`);
 
     return {
       scores: scoresRows.map((r) => r.score),
       mastery: newMastery,
       attempts: attemptsCount,
-      concepts: Object.fromEntries(
-        conceptRows.map((c) => [
-          c.concept,
-          {
-            concept: c.concept,
-            attempts: c.attempts,
-            correct: c.correct,
-            accuracy: c.accuracy,
-          },
-        ])
-      ),
-    };
+    } as TopicData;
   }
 
   async getAllStudents(): Promise<string[]> {
@@ -536,7 +284,6 @@ export class LearnerAgent {
       select: { name: true },
       orderBy: { name: "asc" },
     });
-
     return students.map((s) => s.name);
   }
 }
